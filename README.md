@@ -127,13 +127,13 @@ myna paste-key                # 看当前是哪个
 
 | 档位 | 完整模型 | 定位（实测见下） |
 |---|---|---|
-| `large-v3` | Systran/faster-whisper-large-v3 | **默认，最准**（CER 13.2%，3.8G 显存） |
+| `large-v3` | Systran/faster-whisper-large-v3 | **默认**（GPU 上最快；CER 19.2%*） |
 | `turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | 省显存（2.2G）且最快，但精度没赢过 medium |
-| `medium` | Systran/faster-whisper-medium | 均衡（CER 16.0%，2.0G 显存） |
+| `medium` | Systran/faster-whisper-medium | 均衡（CER 14.7%，2.0G 显存） |
 | `large-v2` | Systran/faster-whisper-large-v2 | 次准，未实测 |
-| `small` | Systran/faster-whisper-small | GPU 不可用时的回退档，中文误识明显（CER 23.8%） |
+| `small` | Systran/faster-whisper-small | GPU 不可用时的回退档，中文误识明显（CER 21.5%） |
 | `base` / `tiny` | Systran/faster-whisper-base / tiny | 最轻，未实测 |
-| `qwen3` | Daumee/Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用（CER 15.9%≈medium，但最慢） |
+| `qwen3` | Daumee/Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用，**中文最准**（CER 7.9%），但最慢 |
 
 > `turbo` 用的是 `deepdml` 的社区转换版——**Systran 没有出 turbo 的
 > CTranslate2 版本**，写成 `Systran/faster-whisper-large-v3-turbo` 会 401。
@@ -146,22 +146,25 @@ GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），
 > 由 `onnxruntime` 推理，**只用 CPU**。需要额外装
 > `onnxruntime`、`librosa`、`tokenizers`（`pip install --break-system-packages
 > onnxruntime librosa tokenizers`），未装时选它会明确提示缺什么。实测（见下）
-> 它准确率接近 medium（CER 15.9%），但 RTF 0.733 全场最慢——比 small 还慢 40%。
-> 真正的价值是**无 GPU 机器上比 small 准**，代价是速度，选它之前先想清楚。
+> 它**中文最准**（CER 7.9%，比 whisper 各档低一半以上），但 RTF 0.709 全场最慢
+> ——说一句要等 0.7 倍时长。当前是 CPU 专用版，能否 GPU 跑待评估；有 GPU 的
+> 机器现在不值得为它牺牲速度，无 GPU 时它远好过 small。
 
 最常改的是 `[hotwords]` —— 把反复听错的人名、术语强制改回来。
 
 ## 实测
 
-RTX 4060 Laptop 8G，5 句中文（piper 合成），float16：
+RTX 4060 Laptop 8G，20 句中文（piper 合成），float16：
 
 | 档位 | 平均字错率 | RTF | 显存 | 加载 |
 |---|---|---|---|---|
-| **large-v3**（默认） | **13.2%** | 0.244 | 3838 MB | 5.6s |
-| turbo | 16.3% | **0.147** | **2174 MB** | 6.3s |
-| medium | 16.0% | 0.153 | 2014 MB | 3.4s |
-| small（CPU/int8） | 23.8% | 0.524 | — | 3.8s |
-| qwen3（CPU/int8） | 15.9% | 0.733 | — | 6.6s |
+| **large-v3**（默认） | 19.2%* | 0.217 | 3838 MB | 17.6s |
+| turbo | 20.8% | **0.134** | **2174 MB** | 3.4s |
+| medium | **14.7%** | 0.142 | 2014 MB | 4.0s |
+| small（CPU/int8） | 21.5% | 0.485 | — | 3.4s |
+| qwen3（CPU/int8） | **7.9%** | 0.709 | — | 7.5s |
+
+\* large-v3 的 19.2% 被**单句异常**拉高：第 14 句大数字「一千二百三十四万五千六百七十八」它 100% 全错（medium/qwen3 全对），一句就贡献约 5 个百分点。去掉这 1 句它约 14.9%，与 medium 同级——**whisper 内部这几档谁更准，20 句样本不足以定论**，见下。
 
 两个指标的含义：
 
@@ -174,23 +177,28 @@ RTX 4060 Laptop 8G，5 句中文（piper 合成），float16：
   还得等更久，交互上不可接受（表里最慢的 qwen3 是 0.733，已经逼近）。
   用比值而非秒数，是为了不受音频长短影响、可横向比较。
 
-**为什么默认 large-v3**：它准得明显（13.2% vs 16%+），而速度差在实际使用中
-感觉不到——说一句 3~6 秒的话，large-v3 转写 0.87 秒，turbo 0.49 秒，
-省下的 0.4 秒你察觉不到，错字却看得见。
+**qwen3 中文意外地准，代价是慢**：7.9% 全场最低，甩开 whisper 各档一半以上。
+数字句（大数字、百分之 X）、成语古文、人名地名、书面长句它几乎全对——whisper
+在「百分之八十」上错 37%~42%，大数字句 large-v3 直接 100% 全错。它是**专门的
+中文 ASR**（Qwen3 架构），这个语料上优势很明显。代价是 RTF 0.709 全场最慢：
+20 句 75 秒音频转 53 秒，说一句要等 0.7 倍时长。当前接入的是 **CPU 专用版**
+（ONNX int8，硬编码 CPU provider）；能不能 GPU 跑——官方 PyTorch 版或
+`onnxruntime-gpu`——**待评估**。若能，就是又快又准，直接改默认。
 
-**turbo 没有想象中划算**：它在这组中文语料上没赢过 medium（16.3% vs 16.0%），
-反而多占 160MB。它真正的价值是省显存——比 large-v3 少 1.7GB。只有当你要同时
-跑别的 GPU 任务时才值得切过去，那种情况下它远好过降级到 small。
+**为什么默认仍是 large-v3**：GPU 上它 RTF 0.217，是 whisper 里最快的，qwen3
+CPU 的 1/3；qwen3 准是准，但 0.709 的实时率在交互上不可接受。large-v3 的 19.2%
+比 medium 高，是第 14 句大数字全错的**单句异常**（去掉后 ~14.9%），**whisper
+内部这几档谁更准，20 句样本定不了论**。维持默认 large-v3，是因为 GPU 最快、
+最成熟，单句异常不代表普遍。
 
-**qwen3 是「没有 GPU 时的精度选项」**：15.9% 的准确率逼近 medium（16.0%）、
-甩开 small（23.8%），还不占显存——CPU 机器上比 small 强不少。代价是 RTF 0.733
-全场最慢（small 0.524），5 句跑下来 13.6s，说一句要等 0.7 倍时长。有 GPU 的
-机器没有换它的理由（medium 更快更准）；中英混说那句它照样 52%，和 whisper
-一样崩。
+**turbo 依然不划算**：20.8% vs medium 14.7%，继续没赢。它唯一的价值还是省
+显存——比 large-v3 少 1.7GB，要同时跑别的 GPU 任务时切它，远好过被挤到 small。
 
-> 这只是 5 句合成语音，**不是严谨评测**。合成语音比真人清晰，真实场景下各档位
-> 差距可能更大。中英混说是共同短板：`myna`、`Linux` 三个档位都没听对，
-> 这不是换档位能解决的，得靠 `[hotwords]` 或 `initial_prompt` 补领域词。
+> 这是 20 句 piper 合成语音，**不是严谨评测**。合成语音比真人清晰；中英混说
+> （`myna`/`Linux`/`Python`/`Java`/`HTTP`）仍是所有模型的共同短板——qwen3 相对
+> 好一点（Python 句只错一个词），whisper 整句崩。方法局限：whisper 常把中文数字
+> 写成「80%」这类缩写，语义对但被 CER 计为错。**5 句和 20 句的结论截然不同**——
+> 样本构成对结论影响巨大，这套数字只够支撑「qwen3 中文更准、但慢」这一个方向。
 
 配置里的 `initial_prompt`（默认「以下是简体中文的句子。」）**不是可选优化**：
 实测它一举解决了 Whisper 中文输出繁体、以及小模型的误识两个问题。
