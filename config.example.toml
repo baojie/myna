@@ -1,0 +1,34 @@
+# myna 配置示例。复制到 ~/.config/myna/config.toml 后按需修改。
+# 所有字段都可省略，省略即用默认值。
+
+[asr]
+model = "large-v3"          # GPU 上 large-v3 与 medium 同为 0.7s，没必要将就精度
+fallback_model = "small"    # GPU 不可用时的回退档
+device = "auto"             # auto | cuda | cpu
+language = "zh"
+# 这句不是可选优化：实测它同时解决了 whisper 中文输出繁体、以及小模型的误识
+initial_prompt = "以下是简体中文的句子。"
+beam_size = 5
+vad_filter = true           # 滤掉静音段，减少 whisper 在无声处的幻听
+
+[audio]
+max_seconds = 120           # 录这么久还没停就自动收尾，防止忘关
+min_seconds = 0.3           # 比这还短判为误触，静默丢弃
+
+[inject]
+method = "clipboard"        # clipboard（推荐）| type（逐字符，中文不可靠）
+paste_key = "ctrl+v"
+restore_clipboard = true    # 粘贴后把你原来的剪贴板内容还回去
+
+# 某些应用 Ctrl+V 语义不同，按窗口类单独指定
+# （注意：GNOME 45+ 下窗口类往往取不到，取不到就用上面的默认键）
+[inject.paste_key_by_app]
+"org.gnome.Console" = "ctrl+shift+v"
+
+[postprocess]
+to_simplified = true        # 繁转简兜底，需要 opencc；没装则自动跳过
+strip = true
+
+# 热词表：把反复听错的词强制改回来。左边是错的，右边是对的。
+[hotwords]
+"三步" = "散步"
