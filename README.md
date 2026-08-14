@@ -120,15 +120,18 @@ myna paste-key                # 看当前是哪个
 
 `[asr] model` 填档位名即可，自动匹配设备与精度：
 
-| 档位 | 完整模型 | 定位 |
+| 档位 | 完整模型 | 定位（实测见下） |
 |---|---|---|
-| `turbo` | faster-whisper-large-v3-turbo | 最快，精度略降 |
-| `large-v3` | faster-whisper-large-v3 | 默认，最准（GPU 上与 medium 同速） |
-| `large-v2` | faster-whisper-large-v2 | 次准 |
-| `medium` | faster-whisper-medium | 均衡 |
-| `small` | faster-whisper-small | 快，中文偶有误识 |
-| `base` / `tiny` | faster-whisper-base / tiny | 最轻 |
-| `qwen3` | Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用，速度待实测 |
+| `large-v3` | Systran/faster-whisper-large-v3 | **默认，最准**（CER 13.2%，3.8G 显存） |
+| `turbo` | deepdml/faster-whisper-large-v3-turbo-ct2 | 省显存（2.2G）且最快，但精度没赢过 medium |
+| `medium` | Systran/faster-whisper-medium | 均衡（CER 16.0%，2.0G 显存） |
+| `large-v2` | Systran/faster-whisper-large-v2 | 次准，未实测 |
+| `small` | Systran/faster-whisper-small | GPU 不可用时的回退档，中文误识明显（CER 23.8%） |
+| `base` / `tiny` | Systran/faster-whisper-base / tiny | 最轻，未实测 |
+| `qwen3` | Daumee/Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用，速度待实测 |
+
+> `turbo` 用的是 `deepdml` 的社区转换版——**Systran 没有出 turbo 的
+> CTranslate2 版本**，写成 `Systran/faster-whisper-large-v3-turbo` 会 401。
 
 也可以直接写任意 HuggingFace 模型名（如 `"Systran/faster-whisper-medium"`）。
 GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），并明确通知你。
@@ -144,15 +147,28 @@ GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），
 
 ## 实测
 
-RTX 4060 Laptop 8G，3.5 秒中文音频：
+RTX 4060 Laptop 8G，5 句中文（piper 合成），float16：
 
-| 配置 | 模型加载 | 转写 |
-|---|---|---|
-| large-v3 / cuda float16 | 12.7s（冷）/ 2.4s（热） | 0.7s |
-| medium / cuda float16 | 9.7s | 0.7s |
-| small / cpu int8 | 1.7s | 1.6s，且把「散步」听成「三步」 |
+| 档位 | 平均字错率 | RTF | 显存 | 加载 |
+|---|---|---|---|---|
+| **large-v3**（默认） | **13.2%** | 0.244 | 3838 MB | 5.6s |
+| turbo | 16.3% | **0.147** | **2174 MB** | 6.3s |
+| medium | 16.0% | 0.153 | 2014 MB | 3.4s |
+| small（CPU/int8） | 23.8% | 0.524 | — | 3.8s |
 
-GPU 上 large-v3 和 medium 一样快，所以默认直接用 large-v3；没有 GPU 才回退 small。
+RTF = 转写耗时 ÷ 音频时长，越小越快；字错率不计标点空格。
+
+**为什么默认 large-v3**：它准得明显（13.2% vs 16%+），而速度差在实际使用中
+感觉不到——说一句 3~6 秒的话，large-v3 转写 0.87 秒，turbo 0.49 秒，
+省下的 0.4 秒你察觉不到，错字却看得见。
+
+**turbo 没有想象中划算**：它在这组中文语料上没赢过 medium（16.3% vs 16.0%），
+反而多占 160MB。它真正的价值是省显存——比 large-v3 少 1.7GB。只有当你要同时
+跑别的 GPU 任务时才值得切过去，那种情况下它远好过降级到 small。
+
+> 这只是 5 句合成语音，**不是严谨评测**。合成语音比真人清晰，真实场景下各档位
+> 差距可能更大。中英混说是共同短板：`myna`、`Linux` 三个档位都没听对，
+> 这不是换档位能解决的，得靠 `[hotwords]` 或 `initial_prompt` 补领域词。
 
 配置里的 `initial_prompt`（默认「以下是简体中文的句子。」）**不是可选优化**：
 实测它一举解决了 Whisper 中文输出繁体、以及小模型的误识两个问题。
