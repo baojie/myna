@@ -53,7 +53,12 @@ class Transcriber:
         return [gpu, cpu] if cuda_available() else [cpu]
 
     def load(self) -> Loaded:
-        """加载模型。GPU 失败自动降级到 CPU，降级必须让用户看得见（由调用方通知）。"""
+        """加载模型。GPU 失败自动降级到 CPU，降级必须让用户看得见（由调用方通知）。
+
+        先把所有候选按「只用本地缓存」试一遍，全都不行才允许联网下载。
+        模型已缓存时就不该为了校验版本去连 HuggingFace——那既拖慢启动，
+        也让「全程本地」这句话不成立。
+        """
         if self.loaded is not None:
             return self.loaded
 
@@ -61,16 +66,23 @@ class Transcriber:
 
         attempts = self._plan()
         errors = []
-        for i, (name, device, compute_type) in enumerate(attempts):
-            try:
-                model = WhisperModel(name, device=device, compute_type=compute_type)
+        for local_only in (True, False):
+            for i, (name, device, compute_type) in enumerate(attempts):
+                try:
+                    model = WhisperModel(name, device=device,
+                                         compute_type=compute_type,
+                                         local_files_only=local_only)
+                except Exception as e:  # 未缓存、显存不足、缺 cuDNN、下载失败……
+                    errors.append(
+                        f"{name}/{device}"
+                        f"{'（仅本地）' if local_only else '（含下载）'}: "
+                        f"{type(e).__name__}: {e}")
+                    continue
                 self.loaded = Loaded(
                     model=model, name=name, device=device,
                     compute_type=compute_type, degraded=(i > 0 or device == "cpu"),
                 )
                 return self.loaded
-            except Exception as e:  # 显存不足、缺 cuDNN、模型下载失败……
-                errors.append(f"{name}/{device}: {type(e).__name__}: {e}")
         raise RuntimeError("模型加载全部失败：\n" + "\n".join(errors))
 
     def transcribe(self, wav: Path) -> str:

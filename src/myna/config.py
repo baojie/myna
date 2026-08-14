@@ -62,11 +62,18 @@ class PostprocessConfig:
 
 
 @dataclass
+class TrayConfig:
+    # 顶栏状态图标。缺 GTK/AppIndicator 时自动跳过，不影响 daemon 本身
+    enabled: bool = True
+
+
+@dataclass
 class Config:
     asr: AsrConfig = field(default_factory=AsrConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     inject: InjectConfig = field(default_factory=InjectConfig)
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
+    tray: TrayConfig = field(default_factory=TrayConfig)
     hotwords: dict[str, str] = field(default_factory=dict)
 
 
@@ -87,5 +94,6 @@ def load(path: Path | None = None) -> Config:
         audio=_build(AudioConfig, raw.get("audio", {})),
         inject=_build(InjectConfig, raw.get("inject", {})),
         postprocess=_build(PostprocessConfig, raw.get("postprocess", {})),
+        tray=_build(TrayConfig, raw.get("tray", {})),
         hotwords={str(k): str(v) for k, v in raw.get("hotwords", {}).items()},
     )

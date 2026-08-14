@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 from enum import Enum
+from typing import Callable
 from pathlib import Path
 
 from . import inject as inject_mod
@@ -40,6 +41,17 @@ class Daemon:
         self._stop = threading.Event()
         self._server: socket.socket | None = None
         self._last_text = ""
+        # 状态变化钩子，托盘图标用它刷新。回调在持锁时被调用，
+        # 实现方必须立刻返回（托盘用 GLib.idle_add 转交主线程）。
+        self.on_state_change: "Callable[[State], None] | None" = None
+
+    def _set_state(self, state: State) -> None:
+        self.state = state
+        if self.on_state_change is not None:
+            try:
+                self.on_state_change(state)
+            except Exception:
+                log.debug("状态回调出错", exc_info=True)
 
     # ---------- 生命周期 ----------
 
@@ -171,7 +183,7 @@ class Daemon:
             except Exception as e:
                 notify.error(f"启动录音失败：{e}")
                 return {"ok": False, "state": self.state.value, "error": str(e)}
-            self.state = State.RECORDING
+            self._set_state(State.RECORDING)
         notify.recording()
         return {"ok": True, "state": State.RECORDING.value}
 
@@ -180,7 +192,7 @@ class Daemon:
             if self.state is not State.RECORDING:
                 return {"ok": False, "state": self.state.value, "error": "当前没有在录音"}
             wav = self.recorder.stop()
-            self.state = State.TRANSCRIBING
+            self._set_state(State.TRANSCRIBING)
         # 转写放到后台线程，客户端（快捷键）立刻返回
         threading.Thread(target=self._finish, args=(wav,), daemon=True).start()
         return {"ok": True, "state": State.TRANSCRIBING.value}
@@ -190,7 +202,7 @@ class Daemon:
             if self.state is not State.RECORDING:
                 return {"ok": False, "state": self.state.value, "error": "当前没有在录音"}
             self.recorder.cancel()
-            self.state = State.IDLE
+            self._set_state(State.IDLE)
         notify.notify("🚫 已放弃本次录音")
         return {"ok": True, "state": State.IDLE.value}
 
@@ -206,7 +218,7 @@ class Daemon:
             if wav:
                 wav.unlink(missing_ok=True)
             with self.lock:
-                self.state = State.IDLE
+                self._set_state(State.IDLE)
 
     def _pipeline(self, wav: Path | None) -> None:
         if wav is None or not wav.exists():
@@ -259,13 +271,39 @@ def run(cfg: Config) -> int:
     d = Daemon(cfg)
     d.preload()
 
+    tray = None
+    if cfg.tray.enabled:
+        from . import tray as tray_mod
+
+        if tray_mod.available():
+            try:
+                tray = tray_mod.Tray(d)
+            except Exception as e:
+                log.warning("托盘图标初始化失败，继续无图标运行：%s", e)
+        else:
+            log.info("没有 GTK/AppIndicator，无托盘图标运行"
+                     "（装 python3-gi 与 gir1.2-ayatanaappindicator3-0.1 可启用）")
+
     import signal as _signal
 
     def _bye(_sig, _frm):
         d.shutdown()
+        if tray is not None:
+            tray.quit()
 
     _signal.signal(_signal.SIGTERM, _bye)
     _signal.signal(_signal.SIGINT, _bye)
 
-    d.serve()
+    if tray is None:
+        d.serve()
+        return 0
+
+    # GTK 要独占主线程，socket 循环让给后台线程
+    t = threading.Thread(target=d.serve, daemon=True)
+    t.start()
+    try:
+        tray.run()
+    finally:
+        d.shutdown()
+        t.join(timeout=3)
     return 0
