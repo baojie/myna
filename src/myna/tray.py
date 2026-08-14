@@ -16,6 +16,10 @@ from . import models as models_mod
 
 log = logging.getLogger("myna")
 
+# GTK 是可选依赖，只能延迟导入；Tray.__init__ 成功后这两个名字才有值
+Gtk = None
+GLib = None
+
 # 用系统主题里的 symbolic 图标，顶栏会自动按主题渲染成单色，
 # 不必自带图标文件，也就不会在深浅色主题下瞎掉。
 ICONS = {
@@ -91,13 +95,26 @@ class Tray:
         except ValueError:
             gi.require_version("AppIndicator3", "0.1")
             from gi.repository import AppIndicator3 as AppIndicator
-        from gi.repository import GLib, Gtk
+        from gi.repository import GLib as _GLib
+        from gi.repository import Gtk as _Gtk
 
         # 导入 Gtk 就已经动了 locale，必须马上拨回来，否则音频解码会炸
         _fix_locale_after_gtk()
 
-        self.Gtk, self.GLib = Gtk, Gtk and GLib
+        # 提到模块全局，好让本类所有方法都能直接写 Gtk。
+        # 否则每个方法都得记着补一句 `Gtk = self.Gtk`，漏一个就是 NameError，
+        # 而托盘初始化失败是被兜底吞掉的——症状只是「图标没了」，很难联想到这里。
+        global Gtk, GLib
+        Gtk, GLib = _Gtk, _GLib
+
+        self.Gtk, self.GLib = _Gtk, _GLib
         self.daemon = daemon
+
+        # 构建和刷新 radio 菜单时 set_active() 会触发 activate 信号，
+        # 那不是用户点的。不屏蔽的话每次启动都会「自己点自己」——实测导致
+        # 启动时白切两次模型（small→large-v3，十几秒和一次显存搬运全浪费）
+        self._suppress = 0
+
 
         self.indicator = AppIndicator.Indicator.new(
             "myna", ICONS["idle"], AppIndicator.IndicatorCategory.APPLICATION_STATUS)
@@ -181,32 +198,42 @@ class Tray:
             clipboard_set(self.daemon._last_text)
 
     def _build_model_menu(self) -> None:
-        Gtk = self.Gtk  # GTK 只在 __init__ 的局部作用域导入，方法里必须走 self
-        sub = Gtk.Menu()
-        group: list = []  # pygobject 的 radio group 要传列表，不能传单个 widget
-        for name in models_mod.PRESETS:
-            item = Gtk.RadioMenuItem.new_with_label(group, name)
-            group.append(item)
-            item.connect("activate", self._on_model_activate, name)
-            self.model_items[name] = item
-            sub.append(item)
-        sub.show_all()
-        self.model_menu = sub
+        self._suppress += 1
+        try:
+            Gtk = self.Gtk  # GTK 只在 __init__ 的局部作用域导入，方法里必须走 self
+            sub = Gtk.Menu()
+            group: list = []  # pygobject 的 radio group 要传列表，不能传单个 widget
+            for name in models_mod.PRESETS:
+                item = Gtk.RadioMenuItem.new_with_label(group, name)
+                group.append(item)
+                item.connect("activate", self._on_model_activate, name)
+                self.model_items[name] = item
+                sub.append(item)
+            sub.show_all()
+            self.model_menu = sub
+        finally:
+            self._suppress -= 1
 
     def _build_paste_menu(self) -> None:
-        sub = Gtk.Menu()
-        group = None
-        for key, label in PASTE_KEYS:
-            item = Gtk.RadioMenuItem.new_with_label(group, label)
-            if group is None:
-                group = item
-            item.connect("activate", self._on_paste_activate, key)
-            self.paste_items[key] = item
-            sub.append(item)
-        sub.show_all()
-        self.paste_menu = sub
+        self._suppress += 1
+        try:
+            Gtk = self.Gtk  # GTK 只在 __init__ 的局部作用域导入，方法里必须走 self
+            sub = Gtk.Menu()
+            group: list = []  # pygobject 的 radio group 要传列表，不能传单个 widget
+            for key, label in PASTE_KEYS:
+                item = Gtk.RadioMenuItem.new_with_label(group, label)
+                group.append(item)
+                item.connect("activate", self._on_paste_activate, key)
+                self.paste_items[key] = item
+                sub.append(item)
+            sub.show_all()
+            self.paste_menu = sub
+        finally:
+            self._suppress -= 1
 
     def _on_paste_activate(self, w, key: str) -> None:
+        if self._suppress:
+            return
         # radio 取消选中时也会触发 activate，只处理真正被选中的那次
         if not w.get_active():
             return
@@ -214,26 +241,36 @@ class Tray:
             self.daemon.set_paste_key(key)
 
     def _on_model_activate(self, w, name: str) -> None:
+        if self._suppress:
+            return
         # radio 在取消选中时也会收到 activate，只在真正选中时处理
         if not w.get_active():
             return
         self.daemon.switch_model(name)
 
     def _refresh_model(self) -> None:
-        st = self.daemon.status()
-        cur = st.get("model")
-        switching = bool(st.get("switching"))
-        self.model_label.set_label(f"当前：{cur or '—'}")
-        for name, item in self.model_items.items():
-            item.set_sensitive(not switching)
-            if not switching:
-                item.set_active(models_mod.resolve_model(name) == cur)
+        self._suppress += 1
+        try:
+            st = self.daemon.status()
+            cur = st.get("model")
+            switching = bool(st.get("switching"))
+            self.model_label.set_label(f"当前：{cur or '—'}")
+            for name, item in self.model_items.items():
+                item.set_sensitive(not switching)
+                if not switching:
+                    item.set_active(models_mod.resolve_model(name) == cur)
+        finally:
+            self._suppress -= 1
 
     def _refresh_paste(self) -> None:
-        cur = self.daemon.cfg.inject.paste_key
-        for key, item in self.paste_items.items():
-            if item.get_active() != (key == cur):
-                item.set_active(key == cur)
+        self._suppress += 1
+        try:
+            cur = self.daemon.cfg.inject.paste_key
+            for key, item in self.paste_items.items():
+                if item.get_active() != (key == cur):
+                    item.set_active(key == cur)
+        finally:
+            self._suppress -= 1
 
     def _on_about(self, _w) -> None:
         from importlib.metadata import PackageNotFoundError, version

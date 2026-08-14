@@ -349,7 +349,10 @@ def run(cfg: Config) -> int:
             try:
                 tray = tray_mod.Tray(d)
             except Exception as e:
-                log.warning("托盘图标初始化失败，继续无图标运行：%s", e)
+                # 光写日志不够：托盘挂了的症状只是「图标没了」，用户根本
+                # 联想不到去翻 journalctl，只会以为服务没起来
+                log.warning("托盘图标初始化失败，继续无图标运行：%s", e, exc_info=True)
+                notify.notify(f"⚠️ 托盘图标加载失败（语音输入仍可用）：{e}")
         else:
             log.info("没有 GTK/AppIndicator，无托盘图标运行"
                      "（装 python3-gi 与 gir1.2-ayatanaappindicator3-0.1 可启用）")

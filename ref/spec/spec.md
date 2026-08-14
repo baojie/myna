@@ -367,3 +367,27 @@ GNOME Shell 的 `Introspect.GetWindows` 返回 AccessDenied，xdotool 也拿不�
   `custom-keybindings` 列表逐个查——否则两个自定义键撞在一起完全发现不了。
 - 匹配用 `'<Super>d'` 带引号的整值，避免 `<Super>d` 误命中 `<Primary><Super>d`。
 - 重绑自己已占的键要保持幂等：把自己那条从冲突里滤掉。
+
+## 14. 事故记录：托盘图标静默消失
+
+用户报告顶栏没有图标，而 `run.sh restart` 一切正常、`status` 全绿。三个 bug
+叠在一起，每一个都足以让托盘整个起不来，而症状只有「图标没了」：
+
+1. **`NameError: Gtk is not defined`**。GTK 是可选依赖，只能在 `__init__` 里
+   延迟导入，于是每个方法都得记着补一句 `Gtk = self.Gtk`——新加的
+   `_build_paste_menu` 漏了。修法不是补那一行，而是把 `Gtk`/`GLib` 提升为
+   模块全局，从根上消掉这类错误。
+2. **`TypeError: Must be sequence`**。PyGObject 的 `RadioMenuItem.new_with_label`
+   要求 group 是 GSList（列表），不能传上一个 item。
+3. **启动时自己点自己**。构建和刷新 radio 菜单时 `set_active()` 会触发
+   `activate` 信号，被当成用户点击——实测每次启动都白切两次模型
+   （small→large-v3），十几秒和一次显存搬运全浪费，粘贴键也被来回改写。
+   用 `_suppress` 计数器在构建/刷新期间屏蔽。
+
+放大伤害的是**兜底**：托盘初始化失败被 `except` 吞掉只写了一行日志，用户根本
+不会想到去翻 journalctl。已改为同时发桌面通知。
+
+测试上的教训：托盘代码几乎无法用真 GTK 单测（要显示服务器、要主循环），却又
+最容易悄悄坏掉。做法是注入**假 gi 模块**把整条构造路径和所有回调走一遍，并且
+让假对象照搬真实 GTK 的约束（如 group 必须是列表）——假对象只能抓住它模拟了的
+那部分语义，漏掉的约束就是测试的盲区。
