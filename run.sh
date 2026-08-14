@@ -3,7 +3,7 @@
 # 启动 myna 八哥语音输入。
 #
 #   ./run.sh                 前台启动守护进程（Ctrl+C 退出），日志直接打在终端
-#   ./run.sh install         绑定快捷键 + 装 systemd 服务，之后开机自启
+#   ./run.sh install         绑定快捷键 + 装 systemd 服务 + 放 dock 图标，之后开机自启
 #   ./run.sh doctor          依赖自检
 #   ./run.sh status          看状态
 #   ./run.sh toggle          开始/停止录音

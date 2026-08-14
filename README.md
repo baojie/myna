@@ -22,7 +22,7 @@ Whisper 模型加载要 10~13 秒，而转写只要 0.7 秒。所以模型必须
 
 ```bash
 ./run.sh doctor    # 逐项自检，缺什么会告诉你怎么装
-./run.sh install   # 绑定快捷键 + 安装并启动 systemd 用户服务，之后开机自启
+./run.sh install   # 绑定快捷键 + 装并启动 systemd 用户服务 + 把图标放进 dock，之后开机自启
 ```
 
 `run.sh` 会把本 checkout 的 `src/` 加进 `PYTHONPATH`，所以不装也能跑；
@@ -64,7 +64,7 @@ myna status     查看状态、当前模型、设备、粘贴键
 myna history    查看识别历史（见下，批量纠错用）
 myna doctor     依赖自检
 myna daemon     前台运行守护进程（调试用）
-myna uninstall  移除快捷键与服务
+myna uninstall  移除快捷键、服务和图标
 ```
 
 ## 顶栏图标

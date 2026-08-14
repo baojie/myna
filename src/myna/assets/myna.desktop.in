@@ -1,0 +1,21 @@
+[Desktop Entry]
+Type=Application
+Name=myna 八哥
+GenericName=语音输入
+Comment=按一下开始说话，再按一下把识别出的文字落在光标处
+# 点图标 = 按快捷键，即 toggle：录音中点它就结束并识别
+Exec=@EXEC@ toggle
+# 必须是绝对路径，不能写图标名。走图标主题查找一旦查不到，GNOME Dash 会抛
+# "firstIcon.icon is null" 的 JS 异常，整个图标项不渲染——表现成「收藏列表里
+# 有、dock 上却没有」，比破图难查得多。
+Icon=@ICON@
+Terminal=false
+StartupNotify=false
+Categories=Utility;
+Keywords=voice;dictation;speech;语音;听写;八哥;
+Actions=Cancel;@TERM_ACTIONS@
+
+[Desktop Action Cancel]
+Name=放弃本次录音
+Exec=@EXEC@ cancel
+@TERM_SECTIONS@

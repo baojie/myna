@@ -197,6 +197,124 @@ def remove_service() -> None:
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=False, timeout=30)
 
 
+DESKTOP_ID = "myna.desktop"
+DESKTOP_PATH = Path.home() / ".local" / "share" / "applications" / DESKTOP_ID
+ICON_DIR = Path.home() / ".local" / "share" / "icons" / "hicolor"
+ICON_PATH = ICON_DIR / "256x256" / "apps" / "myna.png"
+SHELL_SCHEMA = "org.gnome.shell"
+
+# 各家终端把「执行这条命令」写成不同的开关，kitty 直接跟命令不用开关。
+# 用来在 dock 右键菜单里开一个窗口看状态和日志——没有终端就不装这几项。
+TERMINALS = (
+    ("kitty", []),
+    ("ghostty", ["-e"]),
+    ("alacritty", ["-e"]),
+    ("wezterm", ["-e"]),
+    ("gnome-terminal", ["--"]),
+    ("konsole", ["-e"]),
+    ("xfce4-terminal", ["-x"]),
+    ("terminator", ["-x"]),
+    ("x-terminal-emulator", ["-e"]),
+)
+
+
+def _find_terminal() -> str | None:
+    """返回 "终端 开关" 前缀，后面直接跟命令；找不到返回 None。"""
+    for prog, flags in TERMINALS:
+        exe = shutil.which(prog)
+        if exe:
+            return " ".join([exe, *flags])
+    return None
+
+
+def render_desktop(exe: str, icon: str, term: str | None) -> str:
+    """把模板填成最终的 .desktop 内容。
+
+    状态/重启用 `bash -c "...; read"` 把窗口留住——Desktop Action 分组里不能写
+    Terminal= 键，只能自己撑住窗口，否则命令跑完窗口瞬间关掉，什么都看不见。
+
+    重启后要轮询等模型进显存（十几秒）再报状态，否则看到的是「还没起来」的假象。
+    循环次数写成字面量而不是 $(seq 40)：`$` 在 .desktop 的 Exec 里是保留字符，
+    得转义，写字面量省掉一层容易出错的引号嵌套。
+    """
+    wait = " ".join(str(i) for i in range(1, 41))
+    tmpl = (Path(__file__).parent / "assets" / "myna.desktop.in").read_text(encoding="utf-8")
+    if term:
+        actions = "Status;Restart;Log;"
+        sections = f"""
+[Desktop Action Status]
+Name=查看状态
+Exec={term} bash -c "{exe} status; read -n1 -r -p 按任意键关闭"
+
+[Desktop Action Restart]
+Name=重启守护进程
+Exec={term} bash -c "systemctl --user restart myna.service; for i in {wait}; do {exe} status > /dev/null 2>&1 && break; sleep 1; done; {exe} status; read -n1 -r -p 按任意键关闭"
+
+[Desktop Action Log]
+Name=跟踪日志
+Exec={term} journalctl --user -u myna.service -f -n 50
+"""
+    else:
+        actions = ""
+        sections = ""
+    return (tmpl.replace("@EXEC@", exe)
+                .replace("@ICON@", icon)
+                .replace("@TERM_ACTIONS@", actions)
+                .replace("@TERM_SECTIONS@", sections).rstrip() + "\n")
+
+
+def _favorites(add: bool) -> bool:
+    """把 myna 加进 / 移出 GNOME dock 的收藏。不是 GNOME 就静默跳过。"""
+    try:
+        favs = _parse_list(_gsettings("get", SHELL_SCHEMA, "favorite-apps"))
+    except Exception:
+        return False
+    if add:
+        if DESKTOP_ID in favs:
+            return False
+        favs = [DESKTOP_ID, *favs]
+    else:
+        if DESKTOP_ID not in favs:
+            return False
+        favs = [f for f in favs if f != DESKTOP_ID]
+    value = "[" + ", ".join(f"'{f}'" for f in favs) + "]" if favs else "@as []"
+    try:
+        _gsettings("set", SHELL_SCHEMA, "favorite-apps", value)
+    except Exception:
+        return False
+    return True
+
+
+def install_launcher() -> Path:
+    """装 dock/应用列表里的图标。幂等。"""
+    ICON_PATH.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).parent / "assets" / "myna.png", ICON_PATH)
+    scalable = ICON_DIR / "scalable" / "apps" / "myna.svg"
+    scalable.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).parent / "assets" / "myna.svg", scalable)
+
+    DESKTOP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DESKTOP_PATH.write_text(
+        render_desktop(_myna_exe(), str(ICON_PATH), _find_terminal()), encoding="utf-8")
+    subprocess.run(["update-desktop-database", str(DESKTOP_PATH.parent)],
+                   check=False, timeout=30,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _favorites(add=True)
+    return DESKTOP_PATH
+
+
+def remove_launcher() -> bool:
+    _favorites(add=False)
+    existed = DESKTOP_PATH.exists()
+    DESKTOP_PATH.unlink(missing_ok=True)
+    ICON_PATH.unlink(missing_ok=True)
+    (ICON_DIR / "scalable" / "apps" / "myna.svg").unlink(missing_ok=True)
+    subprocess.run(["update-desktop-database", str(DESKTOP_PATH.parent)],
+                   check=False, timeout=30,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return existed
+
+
 def doctor() -> list[tuple[bool, str, str]]:
     """返回 (是否通过, 项目, 说明/修复建议)。"""
     out: list[tuple[bool, str, str]] = []

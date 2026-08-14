@@ -80,6 +80,12 @@ def cmd_install(args) -> int:
     except Exception as e:
         print(f"✗ 服务安装失败：{e}", file=sys.stderr)
         return 1
+    # 图标装不上不算致命：快捷键才是主路径，dock 图标只是顺手
+    try:
+        path = install.install_launcher()
+        print(f"✓ 图标已装进 dock：{path}")
+    except Exception as e:
+        print(f"· 图标没装上（不影响使用）：{e}", file=sys.stderr)
     print()
     return cmd_doctor(args)
 
@@ -90,6 +96,7 @@ def cmd_uninstall(args) -> int:
     print("✓ 快捷键已移除" if install.remove_shortcut() else "· 没有找到快捷键")
     install.remove_service()
     print("✓ 服务已停止并移除")
+    print("✓ 图标已移除" if install.remove_launcher() else "· 没有找到图标")
     return 0
 
 
