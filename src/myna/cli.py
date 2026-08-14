@@ -105,6 +105,23 @@ def cmd_doctor(args) -> int:
     return 0 if not failed else 1
 
 
+def cmd_paste_key(args) -> int:
+    try:
+        if not args.key:
+            print(request("status").get("paste_key", "?"))
+            return 0
+        resp = request("paste_key", {"key": args.key})
+    except DaemonUnavailable as e:
+        print(f"{e}。{HINT}", file=sys.stderr)
+        return 1
+    if not resp.get("ok"):
+        print(resp.get("error", "失败"), file=sys.stderr)
+        return 1
+    print(f"粘贴键已设为 {resp['paste_key']}"
+          + ("" if resp.get("persisted") else "（本次有效，写入配置失败）"))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="myna", description="myna 八哥 —— Linux 桌面语音输入法")
@@ -129,6 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
     ins = sub.add_parser("install", help="安装快捷键与后台服务")
     ins.add_argument("--key", default="<Super>d", help="快捷键，默认 <Super>d")
     ins.set_defaults(func=cmd_install)
+
+    pk = sub.add_parser("paste-key", help="设置粘贴键（终端用 ctrl+shift+v）")
+    pk.add_argument("key", nargs="?", help="如 ctrl+v 或 ctrl+shift+v；省略则显示当前值")
+    pk.set_defaults(func=cmd_paste_key)
 
     sub.add_parser("uninstall", help="移除快捷键与服务").set_defaults(func=cmd_uninstall)
     sub.add_parser("doctor", help="依赖自检").set_defaults(func=cmd_doctor)

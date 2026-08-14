@@ -20,11 +20,14 @@ min_seconds = 0.3           # 比这还短判为误触，静默丢弃
 
 [inject]
 method = "clipboard"        # clipboard（推荐）| type（逐字符，中文不可靠）
-paste_key = "ctrl+v"
+paste_key = "ctrl+v"        # 终端里要用 "ctrl+shift+v"
+                            # 托盘菜单「粘贴方式」可随时一键切换，会写回这里
 restore_clipboard = true    # 粘贴后把你原来的剪贴板内容还回去
 
-# 某些应用 Ctrl+V 语义不同，按窗口类单独指定
-# （注意：GNOME 45+ 下窗口类往往取不到，取不到就用上面的默认键）
+# 按窗口类单独指定粘贴键。
+# 注意：实测 Wayland 下**拿不到**焦点窗口是谁（GNOME Introspect 返回 AccessDenied，
+# xdotool 也看不见原生 Wayland 窗口），所以这段在 Wayland 上基本是死配置，
+# 只对 XWayland 应用偶尔生效。终端场景请用托盘菜单切 paste_key。
 [inject.paste_key_by_app]
 "org.gnome.Console" = "ctrl+shift+v"
 

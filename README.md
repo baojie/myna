@@ -65,10 +65,29 @@ myna uninstall  移除快捷键与服务
 | ⟳ 转圈 | 识别中 |
 
 点开有菜单：开始/停止录音、放弃本次录音、复制上次识别结果、**识别模型**
-（子菜单切换档位，当前打勾）、关于、退出。
+（子菜单切换档位，当前打勾）、**粘贴方式**、关于、退出。
 
 切换模型不用重启 daemon：点菜单项或 `myna model medium`，加载在后台进行，
 几秒后弹出通知确认；加载期间旧模型继续用，切换失败也会明确告诉你并留在旧档。
+
+### 粘贴方式要手动切
+
+**终端的粘贴键是 Ctrl+Shift+V，普通输入框是 Ctrl+V，而 Wayland 下分辨不了
+当前是哪种。** 不是没做，是做不到：GNOME Shell 的 Introspect 接口返回
+AccessDenied，xdotool 也看不见原生 Wayland 窗口——客户端无权知道别的窗口是谁，
+这是 Wayland 的安全模型。
+
+所以托盘菜单里给了「粘贴方式」子菜单，进终端前切一下即可，选择会写回配置文件。
+也可以用命令：
+
+```bash
+myna paste-key ctrl+shift+v   # 终端
+myna paste-key ctrl+v         # 普通输入框
+myna paste-key                # 看当前是哪个
+```
+
+同理，配置里的 `[inject.paste_key_by_app]`（按窗口类自动切）在 Wayland 上
+基本是死配置，只对 XWayland 应用偶尔生效。
 
 需要 `python3-gi` 和 `gir1.2-ayatanaappindicator3-0.1`（Ubuntu 自带），
 以及 GNOME 的 AppIndicator 扩展（Ubuntu 默认启用）。缺了也不影响主功能，

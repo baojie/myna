@@ -83,6 +83,43 @@ def _build(cls, data: dict):
     return cls(**{k: v for k, v in data.items() if k in known})
 
 
+def save_paste_key(key: str, path: Path | None = None) -> None:
+    """把粘贴键写回配置文件，让托盘里的切换在重启后仍然有效。
+
+    这里是**定点文本替换**而不是重新序列化整个 TOML：用户的注释和排版比
+    我们的整洁更值钱，重写一遍会把它们全抹掉。代价是只认得 `[inject]` 段里
+    顶格的 `paste_key = ...`，格式古怪时退化为追加一段——够用。
+    """
+    import re
+
+    path = path or CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    line = f'paste_key = "{key}"'
+
+    # 只在 [inject] 段内替换：paste_key 这个名字在 [inject.paste_key_by_app]
+    # 的子表里也会出现，跨段乱改会写坏用户配置
+    # 注意 [ \t]* 而不是 \s*：多行模式下 \s 会把行尾换行符一起吃掉，
+    # 拼接时就会把 [inject] 和下一行黏成一行，写出语法坏掉的 TOML
+    m = re.search(r"^\[inject\][ \t]*$", text, re.M)
+    if m:
+        start = m.end()  # 停在 [inject] 行尾，换行符之前
+        rest = text[start:]
+        next_section = re.search(r"^\[", rest, re.M)
+        end = start + (next_section.start() if next_section else len(rest))
+        section = text[start:end]
+        if re.search(r"^[ \t]*paste_key[ \t]*=", section, re.M):
+            section = re.sub(r"^[ \t]*paste_key[ \t]*=.*$", line, section,
+                             count=1, flags=re.M)
+        else:
+            section = "\n" + line + section
+        text = text[:start] + section + text[end:]
+    else:
+        text = (text.rstrip() + f"\n\n[inject]\n{line}\n").lstrip("\n")
+
+    path.write_text(text, encoding="utf-8")
+
+
 def load(path: Path | None = None) -> Config:
     path = path or CONFIG_PATH
     if not path.exists():

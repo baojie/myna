@@ -25,6 +25,13 @@ ICONS = {
     "error": "dialog-warning-symbolic",
 }
 
+# 粘贴方式。终端用 Ctrl+Shift+V，普通输入框用 Ctrl+V，而 Wayland 下探测不到
+# 焦点窗口是谁（GNOME Introspect 拒绝访问），自动分辨做不到，只能让用户切。
+PASTE_KEYS = [
+    ("ctrl+v", "Ctrl+V（普通输入框、浏览器、编辑器）"),
+    ("ctrl+shift+v", "Ctrl+Shift+V（终端）"),
+]
+
 LABELS = {
     "idle": "待机",
     "recording": "正在录音…… 再按快捷键结束",
@@ -119,10 +126,18 @@ class Tray:
         self.model_item = Gtk.MenuItem(label="识别模型")
         self.model_item.set_submenu(self.model_menu)
 
+        # 「粘贴方式」子菜单。Wayland 下探测不到焦点窗口是谁，自动分辨终端与
+        # 普通输入框做不到，所以给用户一个明确的一键切换
+        self.paste_items: dict[str, Gtk.RadioMenuItem] = {}
+        self._build_paste_menu()
+        self.paste_item = Gtk.MenuItem(label="粘贴方式")
+        self.paste_item.set_submenu(self.paste_menu)
+
         menu = Gtk.Menu()
         for item in (self.status_item, Gtk.SeparatorMenuItem(),
                      self.toggle_item, self.cancel_item, Gtk.SeparatorMenuItem(),
-                     self.copy_item, self.model_item, Gtk.SeparatorMenuItem(),
+                     self.copy_item, self.model_item, self.paste_item,
+                     Gtk.SeparatorMenuItem(),
                      self.about_item, self.quit_item):
             menu.append(item)
         menu.show_all()
@@ -146,6 +161,7 @@ class Tray:
         self.cancel_item.set_sensitive(state == "recording")
         self.copy_item.set_sensitive(bool(self.daemon._last_text))
         self._refresh_model()
+        self._refresh_paste()
         # 录音时把状态写到图标旁边，扫一眼就知道它在听
         self.indicator.set_label("● 录音中" if state == "recording" else "", "myna")
         return False  # 一次性回调
@@ -177,6 +193,26 @@ class Tray:
         sub.show_all()
         self.model_menu = sub
 
+    def _build_paste_menu(self) -> None:
+        sub = Gtk.Menu()
+        group = None
+        for key, label in PASTE_KEYS:
+            item = Gtk.RadioMenuItem.new_with_label(group, label)
+            if group is None:
+                group = item
+            item.connect("activate", self._on_paste_activate, key)
+            self.paste_items[key] = item
+            sub.append(item)
+        sub.show_all()
+        self.paste_menu = sub
+
+    def _on_paste_activate(self, w, key: str) -> None:
+        # radio 取消选中时也会触发 activate，只处理真正被选中的那次
+        if not w.get_active():
+            return
+        if self.daemon.cfg.inject.paste_key != key:
+            self.daemon.set_paste_key(key)
+
     def _on_model_activate(self, w, name: str) -> None:
         # radio 在取消选中时也会收到 activate，只在真正选中时处理
         if not w.get_active():
@@ -192,6 +228,12 @@ class Tray:
             item.set_sensitive(not switching)
             if not switching:
                 item.set_active(models_mod.resolve_model(name) == cur)
+
+    def _refresh_paste(self) -> None:
+        cur = self.daemon.cfg.inject.paste_key
+        for key, item in self.paste_items.items():
+            if item.get_active() != (key == cur):
+                item.set_active(key == cur)
 
     def _on_about(self, _w) -> None:
         from importlib.metadata import PackageNotFoundError, version

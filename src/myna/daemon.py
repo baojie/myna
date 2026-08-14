@@ -146,6 +146,8 @@ class Daemon:
             return self.status()
         if cmd == "switch":
             return self.switch_model(req.get("model", ""))
+        if cmd == "paste_key":
+            return self.set_paste_key(req.get("key", ""))
         if cmd == "ping":
             return {"ok": True, "state": self.state.value}
         return {"ok": False, "error": f"未知命令：{cmd}"}
@@ -162,6 +164,7 @@ class Daemon:
             "compute_type": loaded.compute_type if loaded else None,
             "degraded": loaded.degraded if loaded else None,
             "switching": self._switching,
+            "paste_key": self.cfg.inject.paste_key,
             "elapsed": round(self.recorder.elapsed, 1),
             "last_text": self._last_text,
             "socket": str(socket_path()),
@@ -243,6 +246,35 @@ class Daemon:
 
         threading.Thread(target=_do, daemon=True).start()
         return {"ok": True, "state": self.state.value, "switching": True}
+
+    def set_paste_key(self, key: str) -> dict:
+        """改粘贴键。
+
+        终端的粘贴是 Ctrl+Shift+V，普通输入框是 Ctrl+V，而 Wayland 下**无法**
+        探测当前焦点窗口是谁（GNOME Introspect 拒绝访问，xdotool 也拿不到原生
+        Wayland 窗口）。既然分辨不了，就让用户自己一键切——这是明确的选择，
+        好过假装能自动判断然后时灵时不灵。
+        """
+        from . import config as config_mod
+        from .inject import parse_key
+
+        try:
+            parse_key(key)  # 先校验，别把非法键写进配置文件
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+
+        self.cfg.inject.paste_key = key
+        try:
+            config_mod.save_paste_key(key)  # 持久化，重启后仍然有效
+        except Exception as e:
+            log.warning("粘贴键已生效但写入配置失败：%s", e)
+            notify.notify(f"✅ 粘贴方式：{key}（本次有效，写入配置失败）")
+            return {"ok": True, "paste_key": key, "persisted": False}
+
+        log.info("粘贴键已改为 %s", key)
+        notify.notify(f"✅ 粘贴方式已改为 {key}")
+        self._set_state(self.state)  # 让托盘刷新勾选
+        return {"ok": True, "paste_key": key, "persisted": True}
 
     # ---------- 转写流水线 ----------
 
