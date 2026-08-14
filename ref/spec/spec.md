@@ -199,7 +199,8 @@ socket 权限 0600。仅本机本用户。
 
 ```toml
 [asr]
-model = "large-v3"        # 回退档 small
+model = "large-v3"        # 档位 turbo|large-v3|large-v2|medium|small|base|tiny，
+                          # 或任意 HF 模型名；回退档 fallback_model（默认 small）
 device = "auto"           # auto | cuda | cpu
 language = "zh"
 initial_prompt = "以下是简体中文的句子。"

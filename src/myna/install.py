@@ -160,10 +160,13 @@ def doctor() -> list[tuple[bool, str, str]]:
         out.append((False, "faster-whisper", "pip install faster-whisper"))
 
     from .asr import cuda_available
+    from .config import load as load_config
 
+    cfg = load_config()
     gpu = cuda_available()
-    out.append((True, "CUDA", "可用，将用 large-v3 / float16"
-                if gpu else "不可用，将降级 small / CPU（精度下降）"))
+    out.append((True, "CUDA",
+                f"可用，将用 {cfg.asr.model} / float16"
+                if gpu else f"不可用，将降级 {cfg.asr.fallback_model} / CPU（精度下降）"))
 
     try:
         import opencc  # noqa: F401

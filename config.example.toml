@@ -2,7 +2,10 @@
 # 所有字段都可省略，省略即用默认值。
 
 [asr]
-model = "large-v3"          # GPU 上 large-v3 与 medium 同为 0.7s，没必要将就精度
+# 模型档位（最准 → 最快）：large-v3 | large-v2 | medium | small | base | tiny
+# GPU 上 large-v3 与 medium 同为 0.7s 转写，默认即最准；turbo 更快但精度略降
+# 也可以直接写任意 HuggingFace 模型名，如 "Systran/faster-whisper-medium"
+model = "large-v3"
 fallback_model = "small"    # GPU 不可用时的回退档
 device = "auto"             # auto | cuda | cpu
 language = "zh"

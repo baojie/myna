@@ -61,6 +61,23 @@ myna uninstall  移除快捷键与服务
 
 `~/.config/myna/config.toml`，全部可选。见 [config.example.toml](config.example.toml)。
 
+### 换识别模型
+
+`[asr] model` 填档位名即可，自动匹配设备与精度：
+
+| 档位 | 完整模型 | 定位 |
+|---|---|---|
+| `turbo` | faster-whisper-large-v3-turbo | 最快，精度略降 |
+| `large-v3` | faster-whisper-large-v3 | 默认，最准（GPU 上与 medium 同速） |
+| `large-v2` | faster-whisper-large-v2 | 次准 |
+| `medium` | faster-whisper-medium | 均衡 |
+| `small` | faster-whisper-small | 快，中文偶有误识 |
+| `base` / `tiny` | faster-whisper-base / tiny | 最轻 |
+
+也可以直接写任意 HuggingFace 模型名（如 `"Systran/faster-whisper-medium"`）。
+GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），并明确通知你。
+`myna status` 会显示当前解析后的完整模型名、设备与计算类型。
+
 最常改的是 `[hotwords]` —— 把反复听错的人名、术语强制改回来。
 
 ## 实测

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
+from .models import known, presets_help, resolve_model
 
 
 def cuda_available() -> bool:
@@ -41,14 +42,14 @@ class Transcriber:
         self.loaded: Loaded | None = None
 
     def _plan(self) -> list[tuple[str, str, str]]:
-        """返回 (模型, 设备, 计算类型) 的尝试顺序。"""
+        """返回 (模型, 设备, 计算类型) 的尝试顺序。模型档位名在此解析为完整名。"""
         a = self.cfg.asr
-        gpu = (a.model, "cuda", "float16")
-        cpu = (a.fallback_model, "cpu", "int8")
+        gpu = (resolve_model(a.model), "cuda", "float16")
+        cpu = (resolve_model(a.fallback_model), "cpu", "int8")
         if a.device == "cuda":
             return [gpu]
         if a.device == "cpu":
-            return [(a.model, "cpu", "int8"), cpu]
+            return [(resolve_model(a.model), "cpu", "int8"), cpu]
         # auto
         return [gpu, cpu] if cuda_available() else [cpu]
 
@@ -83,7 +84,11 @@ class Transcriber:
                     compute_type=compute_type, degraded=(i > 0 or device == "cpu"),
                 )
                 return self.loaded
-        raise RuntimeError("模型加载全部失败：\n" + "\n".join(errors))
+        hint = ""
+        if not known(self.cfg.asr.model) or not known(self.cfg.asr.fallback_model):
+            hint = (f"\n\n模型名不认识？可用档位：{presets_help()}；"
+                    "或直接写任意 HuggingFace 模型名（如 Systran/faster-whisper-medium）")
+        raise RuntimeError("模型加载全部失败：\n" + "\n".join(errors) + hint)
 
     def transcribe(self, wav: Path) -> str:
         a = self.cfg.asr
