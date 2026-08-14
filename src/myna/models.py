@@ -31,6 +31,9 @@ PRESETS: dict[str, str] = {
     "small": "Systran/faster-whisper-small",
     "base": "Systran/faster-whisper-base",
     "tiny": "Systran/faster-whisper-tiny",
+    # Qwen3-ASR 是独立架构（Qwen + ONNX），由 onnxruntime 推理，不走 faster-whisper。
+    # CPU 专用；速度待实测。见 qwen3_asr.py。
+    "qwen3": "Daumee/Qwen3-ASR-0.6B-ONNX-CPU",
 }
 
 # faster-whisper 认识的其余短名（不在档位表里，但配置它也能用）
@@ -58,6 +61,7 @@ APPROX_SIZES: dict[str, str] = {
     "small": "464M",
     "base": "145M",
     "tiny": "75M",
+    "qwen3": "2.5G",
 }
 
 
@@ -91,6 +95,31 @@ def is_downloaded(name: str) -> bool:
     if not snap.is_dir():
         return False
     return any(snap.glob("*/model.bin"))
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "K", "M", "G"):
+        if n < 1024 or unit == "G":
+            return f"{n:.0f}{unit}" if unit in "BK" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}G"
+
+
+def partial_bytes(name: str) -> int:
+    """半途而废的下载已经攒了多少字节。
+
+    huggingface_hub 把未完成的下载留在 blobs/*.incomplete，下次会从这里续传。
+    界面要能说出「已经下了多少」，否则用户面对一个中断过的下载完全没有判断
+    依据——是刚开始还是就差一点？
+    """
+    d = cache_dir(name)
+    total = 0
+    for f in (d / "blobs").glob("*.incomplete") if (d / "blobs").is_dir() else []:
+        try:
+            total += f.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def disk_size(name: str) -> str | None:
@@ -149,14 +178,41 @@ def download(name: str, *, attempts: int = 10, on_retry=None) -> str:
 
 
 def describe(name: str) -> dict:
-    """一个档位的完整说明，供下载对话框与 CLI 展示。"""
+    """一个档位的完整说明，供下载对话框与 CLI 展示。
+
+    含断点信息：中断过的下载攒了多少、占预计总量的百分之多少。用户看到
+    「已下 17%」和看到「未下载」，做的决定是不一样的。
+    """
+    done = is_downloaded(name)
+    partial = 0 if done else partial_bytes(name)
+    approx = APPROX_SIZES.get(name, "未知")
+    percent = None
+    if partial:
+        total = _approx_to_bytes(approx)
+        if total:
+            percent = min(99, int(partial * 100 / total))
     return {
         "preset": name,
         "repo": resolve_model(name),
-        "downloaded": is_downloaded(name),
-        "size": disk_size(name) or APPROX_SIZES.get(name, "未知"),
+        "downloaded": done,
+        # 下载完了就报磁盘实际占用；没下完必须报**预计总量**，
+        # 否则「已下 268M / 272M」看着像快好了，其实才 16%
+        "size": (disk_size(name) if done else None) or approx,
         "path": str(cache_dir(name)),
+        "partial_bytes": partial,
+        "partial": _human(partial) if partial else None,
+        "partial_percent": percent,
     }
+
+
+def _approx_to_bytes(text: str) -> int | None:
+    """"1.6G" -> 字节数。仅用于估算百分比，不必精确。"""
+    try:
+        num, unit = float(text[:-1]), text[-1].upper()
+    except (ValueError, IndexError):
+        return None
+    factor = {"K": 1024, "M": 1024 ** 2, "G": 1024 ** 3}.get(unit)
+    return int(num * factor) if factor else None
 
 
 def resolve_model(name: str) -> str:

@@ -123,6 +123,51 @@ def cmd_paste_key(args) -> int:
     return 0
 
 
+def cmd_models(args) -> int:
+    """列出所有档位：下载状态、体积、断点进度、仓库名、保存位置。"""
+    try:
+        resp = request("models")
+    except DaemonUnavailable:
+        # daemon 没跑也该能看——这些信息全在磁盘上，不依赖守护进程
+        from . import models as models_mod
+
+        resp = {
+            "cache_root": str(models_mod.cache_root()),
+            "current": None,
+            "models": [models_mod.describe(n) for n in models_mod.PRESETS],
+        }
+
+    print(f"模型缓存目录：{resp['cache_root']}")
+    if resp.get("current"):
+        print(f"当前使用：{resp['current']}")
+    print()
+    for m in resp["models"]:
+        # 一律用 get：daemon 可能还跑着旧版本，字段未必齐全，
+        # 一个 KeyError 就让整条命令报废不值当
+        partial = m.get("partial_bytes") or 0
+        if m.get("active"):
+            mark = "●"
+        elif m.get("downloaded"):
+            mark = "✓"
+        elif partial:
+            mark = "◐"
+        else:
+            mark = "·"
+        size = m.get("size", "?")
+        if m.get("downloaded"):
+            state = size
+        elif partial:
+            pct = f" {m['partial_percent']}%" if m.get("partial_percent") else ""
+            state = f"已下 {m.get('partial', '?')}/{size}{pct} 可续传"
+        else:
+            state = f"未下载 约{size}"
+        print(f"{mark} {m['preset']:<9} {state:<28} {m['repo']}")
+    print()
+    print("● 使用中   ✓ 已下载   ◐ 下载中断可续传   · 未下载")
+    print("下载：myna model <档位>")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="myna", description="myna 八哥 —— Linux 桌面语音输入法")
@@ -144,6 +189,8 @@ def build_parser() -> argparse.ArgumentParser:
     mdl.add_argument("name", help="模型档位或 HuggingFace 模型名")
     mdl.set_defaults(func=cmd_model)
 
+    sub.add_parser("models", help="列出所有模型档位与下载状态").set_defaults(
+        func=cmd_models)
     ins = sub.add_parser("install", help="安装快捷键与后台服务")
     ins.add_argument("--key", default=None,
                      help="快捷键，默认 <Super>z（<Super>d 被 GNOME 显示桌面占用）")

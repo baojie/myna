@@ -243,7 +243,12 @@ class Tray:
     def _model_label(self, name: str) -> str:
         """菜单里就标出哪些还没下载，别等用户点了才知道要拉几个 G。"""
         d = models_mod.describe(name)
-        return name if d["downloaded"] else f"{name}（需下载 {d['size']}）"
+        if d["downloaded"]:
+            return name
+        if d["partial_bytes"]:
+            pct = d["partial_percent"]
+            return f"{name}（已下 {d['partial']}{f'，{pct}%' if pct else ''}，可续传）"
+        return f"{name}（需下载 {d['size']}）"
 
     def _confirm_download(self, name: str) -> bool:
         """未下载的档位，先把「是什么模型、多大、存哪、要联网」摆清楚再问。
@@ -253,18 +258,31 @@ class Tray:
         尤其本机主盘已用 98%，权重全靠 /data。
         """
         d = models_mod.describe(name)
+        resumed = bool(d["partial_bytes"])
+        title = (f"继续下载识别模型「{name}」？" if resumed
+                 else f"下载识别模型「{name}」？")
         dlg = Gtk.MessageDialog(
             transient_for=None, modal=True,
             message_type=Gtk.MessageType.QUESTION,
             buttons=Gtk.ButtonsType.OK_CANCEL,
-            text=f"下载识别模型「{name}」？")
+            text=title)
+
+        if resumed:
+            # 中断过的下载，必须说清已经攒了多少、还差多少——
+            # 只说「未下载」会让用户以为要从零开始
+            pct = f"（{d['partial_percent']}%）" if d["partial_percent"] else ""
+            head = (f"上次下载中断了，已存下 <b>{d['partial']}</b> / 约 "
+                    f"{d['size']}{pct}，这次会<b>从断点续传</b>。\n\n")
+        else:
+            head = "这个档位本地还没有，需要联网下载。\n\n"
+
         dlg.format_secondary_markup(
-            f"这个档位本地还没有，需要联网下载。\n\n"
-            f"<b>模型</b>　{GLib.markup_escape_text(d['repo'])}\n"
-            f"<b>大小</b>　约 {d['size']}\n"
-            f"<b>存到</b>　<tt>{GLib.markup_escape_text(d['path'])}</tt>\n\n"
-            f"下载在后台进行，完成后会自动切换并通知你。\n"
-            f"期间当前模型继续可用。")
+            head
+            + f"<b>模型</b>　{GLib.markup_escape_text(d['repo'])}\n"
+            + f"<b>大小</b>　约 {d['size']}\n"
+            + f"<b>存到</b>　<tt>{GLib.markup_escape_text(d['path'])}</tt>\n\n"
+            + "下载在后台进行，完成后会自动切换并通知你。\n"
+              "期间当前模型继续可用；中断了也不会白下，下次接着传。")
         dlg.set_title("myna 八哥 —— 下载模型")
         resp = dlg.run()
         dlg.destroy()

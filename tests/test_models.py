@@ -140,3 +140,73 @@ def test_download_retries_on_exception(monkeypatch):
 
     assert models.download("tiny", attempts=5) == "/fake"
     assert n["i"] == 3
+
+
+# ---------- 断点进度 ----------
+
+
+def _make_cache(tmp_path, name, *, partial=0, complete=False):
+    """造一个 HF 缓存目录：partial 字节的 .incomplete，或完整的 model.bin。"""
+    from myna import models
+
+    d = tmp_path / ("models--" + models.resolve_model(name).replace("/", "--"))
+    (d / "blobs").mkdir(parents=True)
+    if partial:
+        (d / "blobs" / "abc.incomplete").write_bytes(b"x" * partial)
+    if complete:
+        snap = d / "snapshots" / "rev1"
+        snap.mkdir(parents=True)
+        (snap / "model.bin").write_bytes(b"y" * 100)
+    return d
+
+
+def test_partial_bytes_counts_incomplete(tmp_path, monkeypatch):
+    from myna import models
+
+    monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
+    _make_cache(tmp_path, "turbo", partial=1024 * 1024)
+    assert models.partial_bytes("turbo") == 1024 * 1024
+
+
+def test_describe_reports_resume_progress(tmp_path, monkeypatch):
+    """中断过的下载要说清已下多少、百分之多少。"""
+    from myna import models
+
+    monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
+    _make_cache(tmp_path, "turbo", partial=268 * 1024 * 1024)
+    d = models.describe("turbo")
+
+    assert not d["downloaded"]
+    assert d["partial"] == "268.0M"
+    assert d["partial_percent"] == 16          # 268M / 1.6G
+    assert d["size"] == "1.6G", "没下完必须报预计总量，不能报磁盘已占量"
+
+
+def test_size_is_total_not_occupied_while_incomplete(tmp_path, monkeypatch):
+    """真实 bug：分母用了磁盘已占量，显示成「已下 268M / 272M」，看着像快好了。"""
+    from myna import models
+
+    monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
+    _make_cache(tmp_path, "turbo", partial=268 * 1024 * 1024)
+    d = models.describe("turbo")
+    assert d["size"] != d["partial"]
+    assert d["size"] == models.APPROX_SIZES["turbo"]
+
+
+def test_completed_reports_actual_disk_size(tmp_path, monkeypatch):
+    from myna import models
+
+    monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
+    _make_cache(tmp_path, "tiny", complete=True)
+    d = models.describe("tiny")
+    assert d["downloaded"]
+    assert d["partial"] is None
+    assert d["partial_percent"] is None
+
+
+def test_no_partial_when_nothing_downloaded(tmp_path, monkeypatch):
+    from myna import models
+
+    monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
+    d = models.describe("tiny")
+    assert not d["downloaded"] and d["partial_bytes"] == 0 and d["partial"] is None
