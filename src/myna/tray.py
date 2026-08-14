@@ -87,6 +87,10 @@ class Tray:
     """把 daemon 包成一个顶栏图标。daemon 不知道托盘存在，只暴露状态回调。"""
 
     def __init__(self, daemon) -> None:
+        # 用户是否点了「退出 myna」。daemon.run() 靠它区分「主动退出」和
+        # 「托盘自己没了」——后者不该把语音输入一起带走
+        self.user_quit = False
+
         import gi
 
         gi.require_version("Gtk", "3.0")
@@ -353,6 +357,9 @@ class Tray:
         dlg.show()
 
     def _on_quit(self, _w) -> None:
+        # 只有走这里才算「用户真想退出」。GTK 主循环还可能因为别的原因返回
+        # （GTK 内部致命错误、AppIndicator 出问题），那时 daemon 不该跟着死
+        self.user_quit = True
         self.daemon.shutdown()
         self.Gtk.main_quit()
 

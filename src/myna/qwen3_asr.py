@@ -178,7 +178,12 @@ class Qwen3Asr:
 
         self.mel_filters = get_mel_filters()
 
+        # tokenizer.json 有的仓库放 onnx_models/ 里，有的放快照根目录
+        #（实测 Daumee/Qwen3-ASR-0.6B-ONNX-CPU 就在根目录）。
+        # 只认 onnx_models/ 会误落回 transformers fallback——重依赖，尽量别碰。
         tok = onnx_path / "tokenizer.json"
+        if not tok.exists():
+            tok = onnx_path.parent / "tokenizer.json"
         self.tokenizer = SimpleTokenizer(tok if tok.exists() else None)
 
         self.language = language
@@ -188,6 +193,7 @@ class Qwen3Asr:
 
     def _encode_audio(self, mel, mel_len: int) -> "object":
         """mel → 音频特征 [N, 1024]。超长按 CHUNK_SIZE=100 帧分块再拼接。"""
+        np = self.np
         mel_valid = mel[:, :mel_len]
         chunk_num = int(np.ceil(mel_len / CHUNK_SIZE))
 
@@ -250,6 +256,7 @@ class Qwen3Asr:
 
     def _transcribe_chunk(self, wav, max_new_tokens: int = 512) -> dict:
         """单块音频（≤45s）的完整识别，贪心解码直到 EOS。"""
+        np = self.np
         mel = _compute_mel_spectrogram(wav, self.mel_filters)
         mel_len = mel.shape[1]
 

@@ -221,3 +221,83 @@ def test_switch_command_dispatch(d, monkeypatch):
     monkeypatch.setattr(d.transcriber, "switch", lambda name: _FakeLoaded(name))
     resp = d.dispatch({"cmd": "switch", "model": "small"})
     assert resp["ok"]
+
+
+# ---------- 托盘退出不该拖垮 daemon ----------
+#
+# 真实事故：点了托盘菜单里某一项，整个服务就没了，而且再也不自己起来。
+# 原因是 run() 里 `try: tray.run() finally: d.shutdown()`——GTK 主循环无论
+# 因为什么返回（GTK 内部致命错误、AppIndicator 出问题），daemon 都跟着关，
+# 而退出码是 0，systemd 的 Restart=on-failure 也不来救。
+
+
+class FakeTray:
+    """托盘替身：run() 立刻返回，模拟 GTK 主循环意外结束。"""
+
+    def __init__(self, daemon, user_quit=False):
+        self.user_quit = user_quit
+        self.ran = False
+
+    def run(self):
+        self.ran = True
+
+    def quit(self):
+        pass
+
+
+@pytest.fixture
+def run_with_tray(monkeypatch, tmp_path):
+    """把 run() 的重活（加载模型、真开 socket）全打桩，只留托盘那段收尾逻辑。"""
+    import threading
+
+    def _go(user_quit: bool, serve_blocks: bool = False):
+        monkeypatch.setattr(daemon_mod.notify, "notify", lambda *a, **k: None)
+        # 别撞上机器上真在跑的那个 daemon——它会让 run() 直接返回 1
+        monkeypatch.setattr(daemon_mod, "socket_path",
+                            lambda: tmp_path / "control.sock")
+        monkeypatch.setattr(Daemon, "preload", lambda self: None)
+
+        served = threading.Event()
+        stopped = []
+
+        def fake_serve(self):
+            served.set()
+            if serve_blocks:
+                self._stop.wait(5)  # 模拟一直服务着，直到被 shutdown
+
+        monkeypatch.setattr(Daemon, "serve", fake_serve)
+
+        real_shutdown = Daemon.shutdown
+
+        def spy_shutdown(self):
+            stopped.append(True)
+            real_shutdown(self)
+
+        monkeypatch.setattr(Daemon, "shutdown", spy_shutdown)
+
+        tray = FakeTray(None, user_quit=user_quit)
+        import myna.tray as tray_mod
+
+        monkeypatch.setattr(tray_mod, "available", lambda: True)
+        monkeypatch.setattr(tray_mod, "Tray", lambda d: tray)
+
+        cfg = Config()
+        cfg.tray.enabled = True
+        rc = daemon_mod.run(cfg)
+        return rc, tray, served.is_set(), bool(stopped)
+
+    return _go
+
+
+def test_tray_loss_keeps_daemon_serving(run_with_tray):
+    """托盘自己没了，语音输入必须继续——它是配角，不是开关。"""
+    rc, tray, served, was_shutdown = run_with_tray(user_quit=False)
+    assert rc == 0 and tray.ran and served
+    assert not was_shutdown, "托盘意外退出不该关掉 daemon"
+
+
+def test_user_quit_stops_daemon(run_with_tray):
+    """点了「退出 myna」就得真的退出，否则退出菜单形同虚设。"""
+    rc, tray, served, was_shutdown = run_with_tray(user_quit=True)
+    assert rc == 0 and served
+    assert was_shutdown

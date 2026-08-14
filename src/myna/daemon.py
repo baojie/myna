@@ -403,7 +403,19 @@ def run(cfg: Config) -> int:
     t.start()
     try:
         tray.run()
-    finally:
-        d.shutdown()
-        t.join(timeout=3)
+    except Exception as e:
+        log.warning("托盘主循环异常退出：%s", e, exc_info=True)
+
+    # 托盘是配角，语音输入才是主功能。GTK 主循环还会因为别的原因返回——
+    # GTK 内部致命错误、AppIndicator 出问题——而原先这里无条件 shutdown，
+    # 于是「点了下托盘，整个服务没了」，还因为退出码是 0，systemd 的
+    # Restart=on-failure 也不来救，服务就一直躺着。
+    if not tray.user_quit and not d._stop.is_set():
+        log.warning("托盘图标没了，转为无图标继续运行（语音输入不受影响）")
+        notify.notify("⚠️ myna 托盘图标已消失，语音输入仍然可用")
+        t.join()  # 交回 socket 线程，daemon 照常服务直到收到 SIGTERM
+        return 0
+
+    d.shutdown()
+    t.join(timeout=3)
     return 0
