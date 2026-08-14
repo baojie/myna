@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
-from .models import known, presets_help, resolve_model
+from .models import is_qwen3, known, presets_help, resolve_model
 
 
 def cuda_available() -> bool:
@@ -69,6 +69,9 @@ class Transcriber:
         模型已缓存时就不该为了校验版本去连 HuggingFace——那既拖慢启动，
         也让「全程本地」这句话不成立。
         """
+        if is_qwen3(name):
+            return self._load_qwen3(name)
+
         from faster_whisper import WhisperModel  # 延迟导入，客户端命令不必付这个代价
 
         attempts = self._attempts_for(name)
@@ -91,6 +94,25 @@ class Transcriber:
                 )
         raise RuntimeError("模型加载全部失败：\n" + "\n".join(errors) + self._hint(name))
 
+    def _load_qwen3(self, name: str) -> Loaded:
+        """加载 Qwen3-ASR（独立 ONNX 后端，见 qwen3_asr.py）。
+
+        不走 _attempts_for 的 GPU/CPU 降级链：Qwen3-ASR-0.6B-ONNX-CPU 是 CPU
+        专用、无 fallback。本地缓存没有/不全才联网下载——daemon 的 switch_model
+        已先弹框确认（allow_download），到这里是允许下的。
+        """
+        from . import models as models_mod
+        from .qwen3_asr import Qwen3Asr
+
+        repo = resolve_model(name)
+        if not models_mod.is_downloaded(name):
+            models_mod.download(name)  # 带断点续传重试，失败会 raise
+        snap = models_mod.snapshot_dir(name)
+        onnx_dir = snap / "onnx_models"
+        model = Qwen3Asr(onnx_dir, language=self.cfg.asr.language)
+        return Loaded(model=model, name=repo, device="cpu",
+                      compute_type="int8", degraded=False)
+
     def load(self) -> Loaded:
         """加载配置指定的模型（幂等：已加载就直接用）。GPU 失败自动降级到 CPU。"""
         if self.loaded is not None:
@@ -111,6 +133,9 @@ class Transcriber:
     def transcribe(self, wav: Path) -> str:
         a = self.cfg.asr
         loaded = self.load()
+        if is_qwen3(loaded.name):
+            # Qwen3-ASR（ONNX 后端）的 transcribe 直接返回 str
+            return loaded.model.transcribe(str(wav))
         segments, _info = loaded.model.transcribe(  # type: ignore[attr-defined]
             str(wav),
             language=a.language or None,

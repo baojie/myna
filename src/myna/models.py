@@ -84,17 +84,32 @@ def cache_dir(name: str) -> "Path":
     return cache_root() / ("models--" + repo.replace("/", "--"))
 
 
+def is_qwen3(name: str) -> bool:
+    """这个名字是否指向 Qwen3-ASR（Qwen + ONNX，不走 faster-whisper）。"""
+    repo = resolve_model(name).lower()
+    return "qwen3-asr" in repo or "qwen3_asr" in repo
+
+
+def snapshot_dir(name: str):
+    """缓存里该模型的快照目录（唯一），未下载返回 None。"""
+    d = cache_dir(name)
+    snaps = sorted((d / "snapshots").glob("*")) if (d / "snapshots").is_dir() else []
+    return snaps[0] if snaps else None
+
+
 def is_downloaded(name: str) -> bool:
     """是否已完整下载。
 
     只看目录存在是不够的——中断的下载会留下空壳目录（只有 refs/blobs 而
-    没有真正的权重）。以 snapshots 下存在 model.bin 为准。
+    没有真正的权重）。Whisper 以 snapshots 下存在 model.bin 为准；Qwen3-ASR
+    （ONNX）以 decoder 权重存在为准。
     """
-    d = cache_dir(name)
-    snap = d / "snapshots"
-    if not snap.is_dir():
+    snap = snapshot_dir(name)
+    if snap is None:
         return False
-    return any(snap.glob("*/model.bin"))
+    if is_qwen3(name):
+        return (snap / "onnx_models" / "decoder_step.int8.onnx").exists()
+    return (snap / "model.bin").exists()
 
 
 def _human(n: float) -> str:

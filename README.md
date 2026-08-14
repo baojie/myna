@@ -122,10 +122,17 @@ myna paste-key                # 看当前是哪个
 | `medium` | faster-whisper-medium | 均衡 |
 | `small` | faster-whisper-small | 快，中文偶有误识 |
 | `base` / `tiny` | faster-whisper-base / tiny | 最轻 |
+| `qwen3` | Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用，速度待实测 |
 
 也可以直接写任意 HuggingFace 模型名（如 `"Systran/faster-whisper-medium"`）。
 GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），并明确通知你。
 `myna status` 会显示当前解析后的完整模型名、设备与计算类型。
+
+> `qwen3` 和其余档位不是一回事：它不走 faster-whisper，是 Qwen 架构 + ONNX，
+> 由 `onnxruntime` 推理，**只用 CPU**。需要额外装
+> `onnxruntime`、`librosa`、`tokenizers`（`pip install --break-system-packages
+> onnxruntime librosa tokenizers`），未装时选它会明确提示缺什么。转写速度还没
+> 实测（本机网络不稳暂未下载模型），等数据说话再决定要不要长期用。
 
 最常改的是 `[hotwords]` —— 把反复听错的人名、术语强制改回来。
 

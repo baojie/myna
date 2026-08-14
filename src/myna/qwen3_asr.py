@@ -124,19 +124,19 @@ class Qwen3Asr:
 
     def __init__(self, onnx_dir: Path, *, language: Optional[str] = None,
                  num_threads: int = 0, quantize: str = "int8") -> None:
-        import numpy as np
-        import onnxruntime as ort
-
-        onnx_path = Path(onnx_dir)
-
-        # 依赖与文件就绪性一起检查，缺什么一句话说清，别让用户对着 ImportError 猜
-        missing = [m for m in ("librosa", "tokenizers", "onnxruntime")
+        # 依赖先查再导入，缺什么一句话说清，别让用户对着 ImportError 猜
+        missing = [m for m in ("numpy", "onnxruntime", "librosa", "tokenizers")
                    if _import_ok(m) is False]
         if missing:
             raise RuntimeError(
                 "加载 Qwen3-ASR 需要依赖："
                 + "、".join(missing)
                 + "\n安装：pip install --break-system-packages onnxruntime librosa tokenizers")
+
+        import numpy as np
+        import onnxruntime as ort
+
+        onnx_path = Path(onnx_dir)
 
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
