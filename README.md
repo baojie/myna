@@ -133,7 +133,7 @@ myna paste-key                # 看当前是哪个
 | `large-v2` | Systran/faster-whisper-large-v2 | 次准，未实测 |
 | `small` | Systran/faster-whisper-small | GPU 不可用时的回退档，中文误识明显（CER 23.8%） |
 | `base` / `tiny` | Systran/faster-whisper-base / tiny | 最轻，未实测 |
-| `qwen3` | Daumee/Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用，速度待实测 |
+| `qwen3` | Daumee/Qwen3-ASR-0.6B-ONNX-CPU | Qwen 架构 + ONNX，CPU 专用（CER 15.9%≈medium，但最慢） |
 
 > `turbo` 用的是 `deepdml` 的社区转换版——**Systran 没有出 turbo 的
 > CTranslate2 版本**，写成 `Systran/faster-whisper-large-v3-turbo` 会 401。
@@ -145,8 +145,9 @@ GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），
 > `qwen3` 和其余档位不是一回事：它不走 faster-whisper，是 Qwen 架构 + ONNX，
 > 由 `onnxruntime` 推理，**只用 CPU**。需要额外装
 > `onnxruntime`、`librosa`、`tokenizers`（`pip install --break-system-packages
-> onnxruntime librosa tokenizers`），未装时选它会明确提示缺什么。转写速度还没
-> 实测（本机网络不稳暂未下载模型），等数据说话再决定要不要长期用。
+> onnxruntime librosa tokenizers`），未装时选它会明确提示缺什么。实测（见下）
+> 它准确率接近 medium（CER 15.9%），但 RTF 0.733 全场最慢——比 small 还慢 40%。
+> 真正的价值是**无 GPU 机器上比 small 准**，代价是速度，选它之前先想清楚。
 
 最常改的是 `[hotwords]` —— 把反复听错的人名、术语强制改回来。
 
@@ -160,6 +161,7 @@ RTX 4060 Laptop 8G，5 句中文（piper 合成），float16：
 | turbo | 16.3% | **0.147** | **2174 MB** | 6.3s |
 | medium | 16.0% | 0.153 | 2014 MB | 3.4s |
 | small（CPU/int8） | 23.8% | 0.524 | — | 3.8s |
+| qwen3（CPU/int8） | 15.9% | 0.733 | — | 6.6s |
 
 RTF = 转写耗时 ÷ 音频时长，越小越快；字错率不计标点空格。
 
@@ -170,6 +172,12 @@ RTF = 转写耗时 ÷ 音频时长，越小越快；字错率不计标点空格�
 **turbo 没有想象中划算**：它在这组中文语料上没赢过 medium（16.3% vs 16.0%），
 反而多占 160MB。它真正的价值是省显存——比 large-v3 少 1.7GB。只有当你要同时
 跑别的 GPU 任务时才值得切过去，那种情况下它远好过降级到 small。
+
+**qwen3 是「没有 GPU 时的精度选项」**：15.9% 的准确率逼近 medium（16.0%）、
+甩开 small（23.8%），还不占显存——CPU 机器上比 small 强不少。代价是 RTF 0.733
+全场最慢（small 0.524），5 句跑下来 13.6s，说一句要等 0.7 倍时长。有 GPU 的
+机器没有换它的理由（medium 更快更准）；中英混说那句它照样 52%，和 whisper
+一样崩。
 
 > 这只是 5 句合成语音，**不是严谨评测**。合成语音比真人清晰，真实场景下各档位
 > 差距可能更大。中英混说是共同短板：`myna`、`Linux` 三个档位都没听对，

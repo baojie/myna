@@ -40,15 +40,37 @@ def gpu_mb():
 
 
 def run(preset, device="cuda", compute="float16"):
-    from faster_whisper import WhisperModel
-    from myna.models import resolve_model
-    from myna.postprocess import process
+    from myna import models as models_mod
     from myna.config import Config
+    from myna.postprocess import process
 
     cfg = Config()
-    t = time.monotonic()
-    m = WhisperModel(resolve_model(preset), device=device, compute_type=compute)
-    load = time.monotonic() - t
+
+    if models_mod.is_qwen3(preset):
+        # Qwen3-ASR 是独立 ONNX 后端，不走 faster-whisper（见 qwen3_asr.py）。
+        # CPU 专用，无 GPU 显存可报。
+        from myna.qwen3_asr import Qwen3Asr
+
+        t = time.monotonic()
+        snap = models_mod.snapshot_dir(preset)
+        m = Qwen3Asr(snap / "onnx_models", language="zh")
+        load = time.monotonic() - t
+
+        def transcribe(wav: str) -> str:
+            return m.transcribe(wav)
+    else:
+        from faster_whisper import WhisperModel
+        from myna.models import resolve_model
+
+        t = time.monotonic()
+        m = WhisperModel(resolve_model(preset), device=device, compute_type=compute)
+        load = time.monotonic() - t
+
+        def transcribe(wav: str) -> str:
+            segs, _ = m.transcribe(wav, language="zh", beam_size=5,
+                                   initial_prompt=cfg.asr.initial_prompt, vad_filter=True)
+            return "".join(s.text for s in segs).strip()
+
     mem = gpu_mb()
 
     rows, total_audio, total_time, cers = [], 0.0, 0.0, []
@@ -57,9 +79,7 @@ def run(preset, device="cuda", compute="float16"):
         with contextlib.closing(wave.open(wav)) as w:
             dur = w.getnframes() / w.getframerate()
         t = time.monotonic()
-        segs, _ = m.transcribe(wav, language="zh", beam_size=5,
-                               initial_prompt=cfg.asr.initial_prompt, vad_filter=True)
-        hyp = process("".join(s.text for s in segs).strip(), cfg)
+        hyp = process(transcribe(wav), cfg)
         el = time.monotonic() - t
         c = cer(ref, hyp)
         rows.append({"ref": ref, "hyp": hyp, "cer": round(c, 4), "sec": round(el, 2)})

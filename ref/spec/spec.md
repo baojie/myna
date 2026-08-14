@@ -403,6 +403,7 @@ GNOME Shell 的 `Introspect.GetWindows` 返回 AccessDenied，xdotool 也拿不�
 | turbo | 16.3% | **0.147** | **2174 MB** | 6.3s |
 | medium | 16.0% | 0.153 | 2014 MB | 3.4s |
 | small（CPU/int8） | 23.8% | 0.524 | — | 3.8s |
+| qwen3（CPU/int8） | 15.9% | 0.733 | — | 6.6s |
 
 结论：
 
@@ -415,7 +416,11 @@ GNOME Shell 的 `Introspect.GetWindows` 返回 AccessDenied，xdotool 也拿不�
    远好过被挤到 small（23.8%）。所以档位保留，但不作推荐项。
 3. **中英混说是共同短板**：`myna`、`Linux` 三个档位全都听错
    （「明音/明云」「令/灵桌面」）。这不是换档位能解决的，属于 `[hotwords]`
-   和 `initial_prompt` 的职责范围。
+   和 `initial_prompt` 的职责范围。Qwen3 也一样（那句 52%）。
+4. **qwen3 是「没有 GPU 时的精度选项」**。准确率 15.9% 逼近 medium（16.0%）、
+   甩开 small（23.8%），且不占显存；但 RTF 0.733 全场最慢（small 0.524）。
+   定位明确：**无 GPU 机器上比 small 强，代价是慢**；有 GPU 时没有任何换它的
+   理由——medium 更快更准。
 
 方法论上的保留：合成语音比真人清晰，5 句样本量也小，这组数字只够支撑
 「选哪个默认档位」这一个决定，不足以当作模型评测。真实场景（口音、环境噪声、
