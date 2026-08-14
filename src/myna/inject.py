@@ -64,17 +64,58 @@ def clipboard_get() -> str | None:
     return None
 
 
+# wl-copy / xclip 写入后会常驻，这里留着句柄以便回收，避免僵尸进程堆积
+_holders: list[subprocess.Popen] = []
+
+
+def _reap() -> None:
+    for p in _holders[:]:
+        if p.poll() is not None:
+            _holders.remove(p)
+
+
 def clipboard_set(text: str) -> bool:
+    """写系统剪贴板。
+
+    **wl-copy 和 xclip 都不会退出**——Wayland 与 X11 的剪贴板都要求源进程存活
+    来提供内容，这是协议决定的，不是 bug。所以绝不能用 `subprocess.run(timeout=)`
+    等它结束：那必然超时，而内容其实早就写进去了。
+
+    （这里踩过一次：原先用 run(timeout=3)，每次都判定「写剪贴板失败」而直接
+    return，于是粘贴那一步压根没执行。文本躺在剪贴板里，用户什么也没看到。）
+
+    改成：起进程、喂完 stdin 就撒手，然后**读回校验**——剪贴板是「识别结果绝不
+    丢失」这条铁律的最后一道防线，值得多花几十毫秒确认它真的写进去了。
+    """
+    _reap()
     for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"]):
         if not shutil.which(cmd[0]):
             continue
         try:
-            r = subprocess.run(cmd, input=text.encode(), capture_output=True, timeout=3)
-            if r.returncode == 0:
-                return True
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+            p.stdin.write(text.encode())
+            p.stdin.close()
+            _holders.append(p)
         except Exception:
             continue
+        # 给它一点时间抓住 selection，再读回确认
+        for _ in range(12):
+            time.sleep(0.05)
+            got = clipboard_get()
+            if got is not None and got.strip() == text.strip():
+                return True
     return False
+
+
+def clipboard_clear() -> None:
+    """清空剪贴板。恢复空剪贴板时用——wl-copy 不接受空输入。"""
+    if shutil.which("wl-copy"):
+        try:
+            subprocess.run(["wl-copy", "--clear"], capture_output=True, timeout=3)
+        except Exception:
+            pass
 
 
 def press(key_spec: str) -> bool:
@@ -100,7 +141,15 @@ def press(key_spec: str) -> bool:
 
 
 def active_app() -> str | None:
-    """尽力而为地取当前窗口类。GNOME 45+ 封了 Shell.Eval，多数情况下取不到。"""
+    """尽力而为地取当前窗口类。
+
+    实测在 GNOME + Wayland 上**取不到**：GNOME Shell 的 Introspect 接口返回
+    AccessDenied，xdotool 也拿不到原生 Wayland 窗口。这是 Wayland 的安全模型，
+    不是配置问题——客户端无权知道别的窗口是谁。
+
+    于是 `paste_key_by_app` 在 Wayland 上基本是死配置，只在 XWayland 应用上
+    偶尔生效。终端这类粘贴键不同的场景，只能靠用户显式配 `paste_key`。
+    """
     if shutil.which("xdotool"):
         try:
             r = subprocess.run(
@@ -150,6 +199,9 @@ def inject(text: str, cfg: InjectConfig) -> InjectResult:
     if saved is not None:
         # 等粘贴动作真正读完剪贴板再恢复，否则会粘到旧内容
         time.sleep(0.3)
-        clipboard_set(saved)
+        if saved.strip():
+            clipboard_set(saved)
+        else:
+            clipboard_clear()  # 原本就是空的，wl-copy 不接受空输入
 
     return InjectResult(True, True, f"已粘贴（{key}）")
