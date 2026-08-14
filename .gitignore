@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 模型权重一律不入库（存放于 /data，见 ref/summary/）
+models/
+*.bin
+*.pt
+*.onnx
+*.gguf
+*.ggml
+
+# 运行时产物
+*.wav
+*.log
+myna.sock
+/local/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+.DS_Store
