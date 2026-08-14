@@ -91,7 +91,7 @@ GPU 上 large-v3 和 medium 一样快，所以默认直接用 large-v3；没有 
 
 ## 文档
 
-- [docs/spec.md](docs/spec.md) —— 设计规格
+- [ref/spec/spec.md](ref/spec/spec.md) —— 设计规格
 - [ref/summary/existing-setup.md](ref/summary/existing-setup.md) —— 本机原有方案的
   勘察记录与实测数据，本项目的事实基础
 
