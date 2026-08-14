@@ -20,9 +20,11 @@ min_seconds = 0.3           # 比这还短判为误触，静默丢弃
 
 [inject]
 method = "clipboard"        # clipboard（推荐）| type（逐字符，中文不可靠）
-paste_key = "ctrl+v"        # 终端里要用 "ctrl+shift+v"
+paste_key = "shift+insert"  # 默认通用键：终端和普通输入框都认，不用来回切
+                            # 也可以固定成 "ctrl+v"（输入框）或 "ctrl+shift+v"（终端）
                             # 托盘菜单「粘贴方式」可随时一键切换，会写回这里
 restore_clipboard = true    # 粘贴后把你原来的剪贴板内容还回去
+                            # 用 shift+insert 时，鼠标选中区（PRIMARY）也一并还原
 
 # 按窗口类单独指定粘贴键。
 # 注意：实测 Wayland 下**拿不到**焦点窗口是谁（GNOME Introspect 返回 AccessDenied，

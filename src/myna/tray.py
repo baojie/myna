@@ -32,6 +32,7 @@ ICONS = {
 # 粘贴方式。终端用 Ctrl+Shift+V，普通输入框用 Ctrl+V，而 Wayland 下探测不到
 # 焦点窗口是谁（GNOME Introspect 拒绝访问），自动分辨做不到，只能让用户切。
 PASTE_KEYS = [
+    ("shift+insert", "Shift+Insert（通用：终端和输入框都认）"),
     ("ctrl+v", "Ctrl+V（普通输入框、浏览器、编辑器）"),
     ("ctrl+shift+v", "Ctrl+Shift+V（终端）"),
 ]

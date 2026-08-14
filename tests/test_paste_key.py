@@ -93,7 +93,7 @@ def test_rejects_invalid_key_before_writing(d, tmp_path):
     """非法键绝不能写进配置文件。"""
     resp = d.set_paste_key("ctrl+喵")
     assert not resp["ok"]
-    assert d.cfg.inject.paste_key == "ctrl+v"  # 保持原值
+    assert d.cfg.inject.paste_key == "shift+insert"  # 保持默认原值
     assert not (tmp_path / "config.toml").exists()
 
 
@@ -114,7 +114,7 @@ def test_dispatch_paste_key(d):
 
 
 def test_status_reports_paste_key(d):
-    assert d.status()["paste_key"] == "ctrl+v"
+    assert d.status()["paste_key"] == "shift+insert"
 
 
 def test_refreshes_tray(d):

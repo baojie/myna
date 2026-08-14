@@ -49,7 +49,9 @@ class AudioConfig:
 @dataclass
 class InjectConfig:
     method: str = "clipboard"  # clipboard | type
-    paste_key: str = "ctrl+v"
+    # 默认用 shift+insert：终端和普通输入框都认它，省掉「进终端前先切一下」。
+    # 代价是终端那边粘的是 PRIMARY，所以 inject() 会把两份 selection 都写上
+    paste_key: str = "shift+insert"
     restore_clipboard: bool = True
     # 按窗口类覆盖粘贴键，例如 { "org.gnome.Console" = "ctrl+shift+v" }
     paste_key_by_app: dict[str, str] = field(default_factory=dict)

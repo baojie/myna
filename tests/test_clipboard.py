@@ -47,7 +47,7 @@ def test_does_not_wait_for_clipboard_process(monkeypatch):
     monkeypatch.setattr(inject.shutil, "which", lambda p: f"/usr/bin/{p}")
     monkeypatch.setattr(inject.subprocess, "Popen", FakeProc)
     monkeypatch.setattr(inject.time, "sleep", lambda s: None)
-    monkeypatch.setattr(inject, "clipboard_get", lambda: "你好")
+    monkeypatch.setattr(inject, "clipboard_get", lambda primary=False: "你好")
 
     def forbidden(*a, **k):
         raise AssertionError("不该用 subprocess.run 等剪贴板进程结束")
@@ -62,7 +62,7 @@ def test_verifies_readback(monkeypatch):
     monkeypatch.setattr(inject.shutil, "which", lambda p: f"/usr/bin/{p}")
     monkeypatch.setattr(inject.subprocess, "Popen", FakeProc)
     monkeypatch.setattr(inject.time, "sleep", lambda s: None)
-    monkeypatch.setattr(inject, "clipboard_get", lambda: "别的东西")
+    monkeypatch.setattr(inject, "clipboard_get", lambda primary=False: "别的东西")
 
     assert inject.clipboard_set("你好") is False
 
@@ -71,7 +71,7 @@ def test_readback_tolerates_trailing_whitespace(monkeypatch):
     monkeypatch.setattr(inject.shutil, "which", lambda p: f"/usr/bin/{p}")
     monkeypatch.setattr(inject.subprocess, "Popen", FakeProc)
     monkeypatch.setattr(inject.time, "sleep", lambda s: None)
-    monkeypatch.setattr(inject, "clipboard_get", lambda: "你好\n")
+    monkeypatch.setattr(inject, "clipboard_get", lambda primary=False: "你好\n")
 
     assert inject.clipboard_set("你好") is True
 
