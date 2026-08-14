@@ -19,9 +19,21 @@ Whisper 模型加载要 10~13 秒，而转写只要 0.7 秒。所以模型必须
 以及 Python 包 `faster-whisper`（可选 `opencc-python-reimplemented` 用于繁转简）。
 
 ```bash
-pip install --user -e .
-myna doctor      # 逐项自检，缺什么会告诉你怎么装
-myna install     # 绑定快捷键（默认 <Super>d）+ 安装并启动 systemd 用户服务
+./run.sh doctor    # 逐项自检，缺什么会告诉你怎么装
+./run.sh install   # 绑定快捷键 + 安装并启动 systemd 用户服务，之后开机自启
+```
+
+`run.sh` 会把本 checkout 的 `src/` 加进 `PYTHONPATH`，所以不装也能跑；
+想把 `myna` 命令装到 PATH 里则用 `pip install --user -e .`。
+
+常用：
+
+```
+./run.sh            前台启动守护进程，日志直接打在终端（调试用）
+./run.sh restart    改完代码重启后台服务
+./run.sh log        跟踪后台服务日志
+./run.sh test       跑单元测试
+./run.sh <其他>     原样透传给 myna，如 ./run.sh status
 ```
 
 `myna install --key '<Super>space'` 可指定别的快捷键。它是幂等的，写入后会回读
