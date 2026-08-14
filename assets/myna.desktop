@@ -1,0 +1,29 @@
+[Desktop Entry]
+Type=Application
+Name=myna 八哥
+GenericName=语音输入
+Comment=按一下开始说话，再按一下把识别出的文字落在光标处
+# 点图标 = 按快捷键，即 toggle：录音中点它就结束并识别
+Exec=/home/baojie/work/playground/myna/run.sh toggle
+Icon=/home/baojie/.local/share/myna/myna.png
+Terminal=false
+StartupNotify=false
+Categories=Utility;Accessibility;AudioVideo;
+Keywords=voice;dictation;speech;语音;听写;八哥;
+Actions=Cancel;Status;Restart;Log;
+
+[Desktop Action Cancel]
+Name=放弃本次录音
+Exec=/home/baojie/work/playground/myna/run.sh cancel
+
+[Desktop Action Status]
+Name=查看状态
+Exec=kitty --hold --title "myna 状态" /home/baojie/work/playground/myna/run.sh status
+
+[Desktop Action Restart]
+Name=重启守护进程
+Exec=kitty --hold --title "myna 重启" /home/baojie/work/playground/myna/run.sh restart
+
+[Desktop Action Log]
+Name=跟踪日志
+Exec=kitty --title "myna 日志" /home/baojie/work/playground/myna/run.sh log
