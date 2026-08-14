@@ -97,9 +97,10 @@ class Transcriber:
     def _load_qwen3(self, name: str) -> Loaded:
         """加载 Qwen3-ASR（独立 ONNX 后端，见 qwen3_asr.py）。
 
-        不走 _attempts_for 的 GPU/CPU 降级链：Qwen3-ASR-0.6B-ONNX-CPU 是 CPU
-        专用、无 fallback。本地缓存没有/不全才联网下载——daemon 的 switch_model
-        已先弹框确认（allow_download），到这里是允许下的。
+        不走 _attempts_for 的 GPU/CPU 降级链：onnxruntime 内部按可用 provider
+        自动选（有 CUDA 用 CUDA+fp16，否则 CPU），自身不降级。本地缓存没有/
+        不全才联网下载——daemon 的 switch_model 已先弹框确认（allow_download），
+        到这里是允许下的。
         """
         from . import models as models_mod
         from .qwen3_asr import Qwen3Asr
@@ -108,10 +109,12 @@ class Transcriber:
         if not models_mod.is_downloaded(name):
             models_mod.download(name)  # 带断点续传重试，失败会 raise
         snap = models_mod.snapshot_dir(name)
+        # onnx_models 是 Daumee 布局；cvxhull 的 onnx 在快照根目录，
+        # qwen3_asr 内部会回退，这里统一传 onnx_models。
         onnx_dir = snap / "onnx_models"
         model = Qwen3Asr(onnx_dir, language=self.cfg.asr.language)
-        return Loaded(model=model, name=repo, device="cpu",
-                      compute_type="int8", degraded=False)
+        return Loaded(model=model, name=repo, device=model.device,
+                      compute_type=model.compute_type, degraded=False)
 
     def load(self) -> Loaded:
         """加载配置指定的模型（幂等：已加载就直接用）。GPU 失败自动降级到 CPU。"""

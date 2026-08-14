@@ -48,12 +48,14 @@ def run(preset, device="cuda", compute="float16"):
 
     if models_mod.is_qwen3(preset):
         # Qwen3-ASR 是独立 ONNX 后端，不走 faster-whisper（见 qwen3_asr.py）。
-        # CPU 专用，无 GPU 显存可报。
+        # Qwen3Asr 内部按 ort.get_available_providers() 自动选 EP：有 CUDA 走
+        # GPU+fp16，否则 CPU。device/compute 参数对它无效。
+        # onnx 在快照根目录（cvxhull fp16 版）；onnx_models/ 旧布局内部也会回退。
         from myna.qwen3_asr import Qwen3Asr
 
         t = time.monotonic()
         snap = models_mod.snapshot_dir(preset)
-        m = Qwen3Asr(snap / "onnx_models", language="zh")
+        m = Qwen3Asr(snap, language="zh")
         load = time.monotonic() - t
 
         def transcribe(wav: str) -> str:

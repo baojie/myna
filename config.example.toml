@@ -2,11 +2,11 @@
 # 所有字段都可省略，省略即用默认值。
 
 [asr]
-# 模型档位（最准 → 最快）：large-v3 | large-v2 | medium | small | base | tiny
-# GPU 上 large-v3 与 medium 同为 0.7s 转写，默认即最准；turbo 更快但精度略降
+# 模型档位：qwen3（默认，Qwen 架构，中文最准；GPU 上 CUDA+fp16 转写只需 1/15
+# 时长，无 GPU 自动回 CPU）| large-v3 | turbo | medium | small | base | tiny
 # 也可以直接写任意 HuggingFace 模型名，如 "Systran/faster-whisper-medium"
-model = "large-v3"
-fallback_model = "small"    # GPU 不可用时的回退档
+model = "qwen3"
+fallback_model = "small"    # faster-whisper 档位 GPU 不可用时的回退档（qwen3 不走这套）
 device = "auto"             # auto | cuda | cpu
 language = "zh"
 # 这句不是可选优化：实测它同时解决了 whisper 中文输出繁体、以及小模型的误识

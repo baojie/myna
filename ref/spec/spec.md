@@ -399,27 +399,34 @@ GNOME Shell 的 `Introspect.GetWindows` 返回 AccessDenied，xdotool 也拿不�
 
 | 档位 | 平均 CER | RTF | 显存 | 加载 |
 |---|---|---|---|---|
+| **qwen3**（GPU/fp16） | **8.8%** | **0.067** | ~3.9G | 6.5s |
 | **large-v3** | 19.2%* | 0.217 | 3838 MB | 17.6s |
-| turbo | 20.8% | **0.134** | **2174 MB** | 3.4s |
-| medium | **14.7%** | 0.142 | 2014 MB | 4.0s |
+| turbo | 20.8% | 0.134 | 2174 MB | 3.4s |
+| medium | 14.7% | 0.142 | 2014 MB | 4.0s |
 | small（CPU/int8） | 21.5% | 0.485 | — | 3.4s |
-| qwen3（CPU/int8） | **7.9%** | 0.709 | — | 7.5s |
+| qwen3（无 GPU，CPU） | 8.8% | 0.643 | — | 10.5s |
 
 \* large-v3 被第 14 句大数字「一千二百三十四万五千六百七十八」单句异常拉高
 （100% 全错，medium/qwen3 全对），去掉后约 14.9%，与 medium 同级。
 
+qwen3 是本机默认。用的**原生 fp16 ONNX 导出**（cvxhull/qwen3-asr-0.6b-onnx-fp16），
+onnxruntime 探测到 CUDA 走 GPU+fp16，否则回 CPU（fp16 由 EP 自动提升到 fp32）。
+此前接入的 Daumee int8 版只有 int8 decoder，而 int8 量化算子在 CUDA 上没有
+kernel——实测 onnxruntime 给 decoder 插入 423 个 Memcpy 节点拷回 CPU 算，20 句里
+decoder 占 81% 耗时，GPU 化后 RTF 只有 0.40；fp16 版 GPU 上 RTF 0.067，快 6 倍。
+（GPU 化的依赖：`onnxruntime-gpu` + cuDNN，本机因主盘紧张装 `/data`，myna 的
+systemd 服务用 `PYTHONPATH`/`LD_LIBRARY_PATH` 指过去。）
+
 结论：
 
-1. **qwen3 中文最准，代价是慢**。CER 7.9% 甩开 whisper 各档一半以上：数字句
+1. **qwen3 又快又准，是默认**。CER 8.8% 甩开 whisper 各档一半以上：数字句
    （大数字、百分之 X）、成语古文、人名地名、书面长句几乎全对，而 whisper 在
-   「百分之八十」上错 37%~42%、大数字句 large-v3 直接崩。它是**专门的中文 ASR**
-   （Qwen3 架构），优势在这个语料上很明显。但 RTF 0.709 全场最慢——20 句 75 秒
-   音频转 53 秒，说一句要等 0.7 倍时长。当前接入的是 **CPU 专用版**（int8 ONNX，
-   硬编码 CPU provider）；**能否 GPU 跑待评估**（官方 PyTorch 版或 onnx-gpu）。
-2. **默认维持 large-v3**。GPU 上 RTF 0.217 是 whisper 里最快的（qwen3 CPU 的
-   1/3），加载也快；qwen3 的准确率换不来 0.709 的交互延迟。large-v3 的 19.2%
-   高于 medium 是单句异常，**whisper 内部谁更准，20 句定不了论**——这本身也
-   说明 5 句样本的选型结论不可靠。
+   「百分之八十」上错 37%~42%、大数字句 large-v3 直接崩。GPU 上 RTF 0.067
+   （20 句 75 秒音频只转 5 秒），比 large-v3 快 3 倍多；无 GPU 回 CPU 0.643，
+   仍是准优先时最好选择。
+2. **默认从 large-v3 换成 qwen3**。GPU 上速度、准确率全面胜出，显存量级相同。
+   large-v3 的 19.2% 有单句异常成分，去噪后 ~14.9% 仍不及 qwen3。whisper 内部
+   谁更准 20 句定不了论，但已不需要论。
 3. **turbo 名不副实**（至少在中文上）。CER 20.8% vs medium 14.7%，继续没赢。
    它唯一的价值是比 large-v3 省 1.7GB 显存——要同时跑别的 GPU 任务时切 turbo，
    远好过被挤到 small。档位保留，不作推荐。
@@ -430,5 +437,5 @@ GNOME Shell 的 `Introspect.GetWindows` 返回 AccessDenied，xdotool 也拿不�
 方法论上的保留：20 句 piper 合成语音仍非严谨评测——合成语音比真人清晰；
 whisper 常把中文数字写成「80%」这类缩写（语义对但 CER 计错）；**5 句与 20 句的
 结论截然不同，样本构成对结论影响巨大**。这套数字只够支撑「qwen3 中文更准、
-但慢」这一个方向，不足以当模型评测。真实场景（口音、环境噪声、远场）下差距
-可能是另一回事。
+且 GPU 上更快」这一个方向，不足以当模型评测。真实场景（口音、环境噪声、远场）下
+差距可能是另一回事。

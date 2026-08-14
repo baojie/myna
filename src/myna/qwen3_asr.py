@@ -137,6 +137,10 @@ class Qwen3Asr:
         import onnxruntime as ort
 
         onnx_path = Path(onnx_dir)
+        # cvxhull 的 onnx 在快照根目录；Daumee 的在 onnx_models/ 子目录。
+        # 调用方统一传 onnx_models，缺 onnx 就回退到父目录，两种结构都能加载。
+        if not any(onnx_path.glob("*.onnx")) and (onnx_path.parent / "decoder_step.onnx").exists():
+            onnx_path = onnx_path.parent
 
         sess_opts = ort.SessionOptions()
         sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
@@ -144,37 +148,76 @@ class Qwen3Asr:
             sess_opts.intra_op_num_threads = num_threads
         sess_opts.log_severity_level = 3  # 屏蔽 onnxruntime 的启动噪音
 
-        if quantize == "int8" and (onnx_path / "decoder_init.int8.onnx").exists():
-            decoder_init, decoder_step = "decoder_init.int8.onnx", "decoder_step.int8.onnx"
-        else:
-            decoder_init, decoder_step = "decoder_init.onnx", "decoder_step.onnx"
+        # 能上 CUDA 就上 CUDA（不支持的算子自动落回 CPU EP）；否则纯 CPU。
+        # GPU 上 int8 量化的 decoder 也能跑，CTranslate2 之外的这套 ONNX 后端
+        # 从此不再硬编码 CPU。实测数据见 README「实测」。
+        available = ort.get_available_providers()
+        self.providers = (["CUDAExecutionProvider", "CPUExecutionProvider"]
+                          if "CUDAExecutionProvider" in available
+                          else ["CPUExecutionProvider"])
 
-        needed = [
-            "encoder_conv.onnx", "encoder_transformer.onnx",
-            decoder_init, decoder_step, "embed_tokens.bin",
-        ]
+        # 两种模型结构都支持：
+        #   - 单 encoder.onnx（cvxhull/qwen3-asr-0.6b-onnx-fp16）：encoder 内部
+        #     封装了窗口 conv + transformer，decoder 是原生 fp16；CPU 上由
+        #     onnxruntime 自动提升到 fp32 跑，GPU 上全速 fp16。Decoder 接口
+        #     与 Daumee 版完全一致（input_embeds/position_ids → logits/KV）。
+        #   - 双 encoder_conv + encoder_transformer（Daumee/Qwen3-ASR-0.6B-ONNX-CPU）：
+        #     decoder 只有 int8，int8 量化算子在 CUDA 上没 kernel，会整体回 CPU
+        #     算（实测 20 句 decoder 占 81% 耗时），所以带 CUDA 时优先推荐单模型版。
+        single_encoder = (onnx_path / "encoder.onnx").exists()
+        self.single_encoder = single_encoder
+
+        if single_encoder:
+            decoder_init, decoder_step = "decoder_init.onnx", "decoder_step.onnx"
+            needed = ["encoder.onnx", decoder_init, decoder_step, "embed_tokens.bin"]
+        else:
+            if quantize == "int8" and (onnx_path / "decoder_init.int8.onnx").exists():
+                decoder_init, decoder_step = "decoder_init.int8.onnx", "decoder_step.int8.onnx"
+            else:
+                decoder_init, decoder_step = "decoder_init.onnx", "decoder_step.onnx"
+            needed = [
+                "encoder_conv.onnx", "encoder_transformer.onnx",
+                decoder_init, decoder_step, "embed_tokens.bin",
+            ]
+
         absent = [f for f in needed if not (onnx_path / f).exists()]
         if absent:
             raise RuntimeError(
                 f"Qwen3-ASR 模型不完整，缺：{', '.join(absent)}\n"
                 f"模型目录：{onnx_path}\n请重新下载（`myna model qwen3` 或托盘模型菜单）")
 
-        self.encoder_conv = ort.InferenceSession(
-            str(onnx_path / "encoder_conv.onnx"), sess_opts,
-            providers=["CPUExecutionProvider"])
-        self.encoder_transformer = ort.InferenceSession(
-            str(onnx_path / "encoder_transformer.onnx"), sess_opts,
-            providers=["CPUExecutionProvider"])
+        if single_encoder:
+            self.encoder = ort.InferenceSession(
+                str(onnx_path / "encoder.onnx"), sess_opts,
+                providers=self.providers)
+            self.encoder_conv = self.encoder_transformer = None
+        else:
+            self.encoder = None
+            self.encoder_conv = ort.InferenceSession(
+                str(onnx_path / "encoder_conv.onnx"), sess_opts,
+                providers=self.providers)
+            self.encoder_transformer = ort.InferenceSession(
+                str(onnx_path / "encoder_transformer.onnx"), sess_opts,
+                providers=self.providers)
         self.decoder_init = ort.InferenceSession(
             str(onnx_path / decoder_init), sess_opts,
-            providers=["CPUExecutionProvider"])
+            providers=self.providers)
         self.decoder_step = ort.InferenceSession(
             str(onnx_path / decoder_step), sess_opts,
-            providers=["CPUExecutionProvider"])
+            providers=self.providers)
 
+        # embed_tokens：fp16 导出（cvxhull）的 bin 约 297MB，fp32（Daumee）约 594MB
+        embed_bytes = (onnx_path / "embed_tokens.bin").stat().st_size
+        self.embed_dtype = np.float16 if embed_bytes < 400_000_000 else np.float32
         self.embed_tokens = np.fromfile(
-            str(onnx_path / "embed_tokens.bin"), dtype=np.float32,
+            str(onnx_path / "embed_tokens.bin"), dtype=self.embed_dtype,
         ).reshape(VOCAB_SIZE, HIDDEN_SIZE)
+
+        # 供上层（myna status / 日志）报告实际设备与计算类型
+        self.device = "cuda" if self.providers[0] == "CUDAExecutionProvider" else "cpu"
+        self.compute_type = ("fp16" if self.embed_dtype == np.float16 else
+                             ("int8" if (onnx_path / "decoder_init.int8.onnx").exists()
+                              else "fp32"))
 
         self.mel_filters = get_mel_filters()
 
@@ -194,6 +237,15 @@ class Qwen3Asr:
     def _encode_audio(self, mel, mel_len: int) -> "object":
         """mel → 音频特征 [N, 1024]。超长按 CHUNK_SIZE=100 帧分块再拼接。"""
         np = self.np
+        if self.single_encoder:
+            # 单 encoder.onnx：窗口 conv/attention 都封装在模型内部，
+            # 喂 [1,128,T] 直接得到全部特征，无需分块。cvxhull 的导出按
+            # WhisperFeatureExtractor 惯例 drop 末帧，mel 需对齐。
+            m = mel[:, :mel_len]
+            if m.shape[1] > 1:
+                m = m[:, :-1]
+            x = m[np.newaxis, ...].astype(self.embed_dtype)
+            return self.encoder.run(None, {"mel": x})[0][0]
         mel_valid = mel[:, :mel_len]
         chunk_num = int(np.ceil(mel_len / CHUNK_SIZE))
 

@@ -21,7 +21,9 @@ set -euo pipefail
 SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 HERE="$(cd "$(dirname "$SCRIPT")" && pwd)"
 
-export PYTHONPATH="$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
+# onnxruntime（GPU 版）装在 /data/pip、cuDNN 在 /data/cudnn（主盘紧张，重依赖一律放 /data）
+export PYTHONPATH="/data/pip:$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
+export LD_LIBRARY_PATH="/data/cudnn/nvidia/cudnn/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 PY="${PYTHON:-python3}"
 
 cmd="${1:-daemon}"

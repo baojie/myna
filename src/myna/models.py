@@ -32,8 +32,11 @@ PRESETS: dict[str, str] = {
     "base": "Systran/faster-whisper-base",
     "tiny": "Systran/faster-whisper-tiny",
     # Qwen3-ASR 是独立架构（Qwen + ONNX），由 onnxruntime 推理，不走 faster-whisper。
-    # CPU 专用；速度待实测。见 qwen3_asr.py。
-    "qwen3": "Daumee/Qwen3-ASR-0.6B-ONNX-CPU",
+    # 原生 fp16 导出（cvxhull）：GPU 上全速 fp16（实测 RTF 0.067），无 GPU 时
+    # onnxruntime 自动提升到 fp32 在 CPU 跑（RTF 0.643），见 qwen3_asr.py。
+    # 曾用 Daumee/Qwen3-ASR-0.6B-ONNX-CPU（int8），但 int8 量化算子在 CUDA 上
+    # 没 kernel，GPU 只能当 CPU 用；fp16 版 GPU/CPU 都能跑且更快。
+    "qwen3": "cvxhull/qwen3-asr-0.6b-onnx-fp16",
 }
 
 # faster-whisper 认识的其余短名（不在档位表里，但配置它也能用）
@@ -61,7 +64,7 @@ APPROX_SIZES: dict[str, str] = {
     "small": "464M",
     "base": "145M",
     "tiny": "75M",
-    "qwen3": "2.5G",
+    "qwen3": "2.9G",
 }
 
 
@@ -108,7 +111,10 @@ def is_downloaded(name: str) -> bool:
     if snap is None:
         return False
     if is_qwen3(name):
-        return (snap / "onnx_models" / "decoder_step.int8.onnx").exists()
+        # cvxhull 的 onnx 在快照根目录（decoder_step.onnx）；Daumee 旧版在
+        # onnx_models/（decoder_step.int8.onnx）。两个都认，避免误判未下载。
+        return ((snap / "decoder_step.onnx").exists()
+                or (snap / "onnx_models" / "decoder_step.int8.onnx").exists())
     return (snap / "model.bin").exists()
 
 

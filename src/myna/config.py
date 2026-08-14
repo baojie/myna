@@ -30,7 +30,7 @@ def socket_path() -> Path:
 
 @dataclass
 class AsrConfig:
-    model: str = "large-v3"
+    model: str = "qwen3"
     fallback_model: str = "small"
     device: str = "auto"  # auto | cuda | cpu
     language: str = "zh"
