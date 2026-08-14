@@ -36,6 +36,16 @@ restore_clipboard = true    # 粘贴后把你原来的剪贴板内容还回去
 [tray]
 enabled = true              # 顶栏状态图标。缺 GTK/AppIndicator 会自动跳过，不影响主功能
 
+[history]
+# 每次识别落一行 JSONL 到 ~/.local/share/myna/history/YYYY-MM.jsonl。
+# 存的是 raw（模型原始输出）和 text（实际注入）两份——日后要批量纠错，
+# 只有对照着看才分得清一处错是模型听错的，还是热词/繁转简改坏的。
+# 时间戳带毫秒和时区，可与 Claude Code 的 transcript 按时间对齐。
+enabled = true
+save_audio = false          # 存下音频才能用新模型重跑做 A/B，但也最占盘
+max_audio_mb = 200          # 音频总量上限，超了自动删最旧的
+dir = ""                    # 留空即 ~/.local/share/myna；主盘紧张就指到别的盘
+
 [postprocess]
 to_simplified = true        # 繁转简兜底，需要 opencc；没装则自动跳过
 strip = true

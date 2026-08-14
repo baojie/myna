@@ -168,6 +168,38 @@ def cmd_models(args) -> int:
     return 0
 
 
+def cmd_history(args) -> int:
+    """看识别历史。纯读本地文件，不依赖 daemon 在不在跑。"""
+    from . import history
+
+    cfg = config_mod.load(args.config)
+    if args.path:
+        print(history.log_path(cfg))
+        return 0
+
+    rows = history.read_recent(args.limit, cfg)
+    if not rows:
+        print(f"还没有历史记录。存档位置：{history.log_path(cfg)}", file=sys.stderr)
+        if not cfg.history.enabled:
+            print("（当前配置里 [history] enabled = false）", file=sys.stderr)
+        return 1
+
+    if args.json:
+        for r in rows:
+            print(json.dumps(r, ensure_ascii=False))
+        return 0
+
+    for r in rows:
+        ts = r.get("ts", "")[:19].replace("T", " ")
+        flag = {"ok": " ", "clipboard": "📋", "fail": "✗", "empty": "∅"}.get(
+            r.get("injected", ""), "?")
+        print(f"{ts} {flag} {r.get('text', '')}")
+        # raw 和最终文本不同，说明后处理动过手——纠错时这行最值得看
+        if args.raw and r.get("raw") != r.get("text"):
+            print(f"{'':19}   ↑ raw: {r.get('raw', '')}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="myna", description="myna 八哥 —— Linux 桌面语音输入法")
@@ -201,6 +233,13 @@ def build_parser() -> argparse.ArgumentParser:
     pk = sub.add_parser("paste-key", help="设置粘贴键（终端用 ctrl+shift+v）")
     pk.add_argument("key", nargs="?", help="如 ctrl+v 或 ctrl+shift+v；省略则显示当前值")
     pk.set_defaults(func=cmd_paste_key)
+
+    his = sub.add_parser("history", help="查看识别历史（供批量纠错用）")
+    his.add_argument("-n", "--limit", type=int, default=20, help="显示条数，默认 20")
+    his.add_argument("--raw", action="store_true", help="同时显示后处理前的原始输出")
+    his.add_argument("--json", action="store_true", help="按行输出 JSONL，便于管道处理")
+    his.add_argument("--path", action="store_true", help="只打印存档文件路径")
+    his.set_defaults(func=cmd_history)
 
     sub.add_parser("uninstall", help="移除快捷键与服务").set_defaults(func=cmd_uninstall)
     sub.add_parser("doctor", help="依赖自检").set_defaults(func=cmd_doctor)

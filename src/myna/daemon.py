@@ -17,7 +17,7 @@ from typing import Callable
 from pathlib import Path
 
 from . import inject as inject_mod
-from . import notify, postprocess
+from . import history, notify, postprocess
 from .asr import Transcriber
 from .audio import Recorder, wav_duration
 from .config import Config, socket_path
@@ -332,15 +332,36 @@ class Daemon:
         notify.transcribing()
         t = time.monotonic()
         raw = self.transcriber.transcribe(wav)
+        latency = time.monotonic() - t
         text = postprocess.process(raw, self.cfg)
-        log.info("识别 %.1fs 音频用时 %.1fs：%r", duration, time.monotonic() - t, text)
+        log.info("识别 %.1fs 音频用时 %.1fs：%r", duration, latency, text)
+
+        loaded = self.transcriber.loaded
+
+        def _archive(injected: str) -> None:
+            # raw 和 text 都要存：只有对照着看，才分得清一处错是模型听错的
+            # 还是后处理（繁转简/热词）改坏的。
+            # record 自己已经吞异常，这里再兜一层：这行代码夹在 inject 和
+            # notify 之间，一旦漏出异常，字已经粘出去了而用户什么提示都收不到
+            try:
+                history.record(
+                    self.cfg, raw=raw, text=text, wav=wav,
+                    duration=duration, latency=latency,
+                    model=loaded.name if loaded else None,
+                    device=loaded.device if loaded else None,
+                    injected=injected,
+                )
+            except Exception:
+                log.debug("写历史失败", exc_info=True)
 
         if not text:
+            _archive("empty")  # 空结果也是样本：能看出 VAD 或阈值是不是太狠
             notify.error("未识别到语音")
             return
 
         self._last_text = text
         result = inject_mod.inject(text, self.cfg.inject)
+        _archive("ok" if result.ok else ("clipboard" if result.on_clipboard else "fail"))
         if result.ok:
             notify.result(text)
         elif result.on_clipboard:

@@ -64,6 +64,18 @@ class PostprocessConfig:
 
 
 @dataclass
+class HistoryConfig:
+    """识别历史存档。默认开着——攒下来的记录是日后批量纠错唯一的原料。"""
+
+    enabled: bool = True
+    # 音频默认不存：存了才能重跑新模型做 A/B，但也最占盘。要做 batch 纠错
+    # 建议打开，并把 dir 指到空间富裕的盘
+    save_audio: bool = False
+    max_audio_mb: float = 200.0  # 音频总量上限，超了删最旧的
+    dir: str = ""  # 留空即 ~/.local/share/myna
+
+
+@dataclass
 class TrayConfig:
     # 顶栏状态图标。缺 GTK/AppIndicator 时自动跳过，不影响 daemon 本身
     enabled: bool = True
@@ -76,6 +88,7 @@ class Config:
     inject: InjectConfig = field(default_factory=InjectConfig)
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     tray: TrayConfig = field(default_factory=TrayConfig)
+    history: HistoryConfig = field(default_factory=HistoryConfig)
     hotwords: dict[str, str] = field(default_factory=dict)
 
 
@@ -134,5 +147,6 @@ def load(path: Path | None = None) -> Config:
         inject=_build(InjectConfig, raw.get("inject", {})),
         postprocess=_build(PostprocessConfig, raw.get("postprocess", {})),
         tray=_build(TrayConfig, raw.get("tray", {})),
+        history=_build(HistoryConfig, raw.get("history", {})),
         hotwords={str(k): str(v) for k, v in raw.get("hotwords", {}).items()},
     )

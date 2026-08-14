@@ -59,6 +59,7 @@ myna cancel     放弃本次录音，不识别
 myna model      切换识别模型（如 `myna model medium`，也可托盘里点）
 myna paste-key  设置粘贴键（终端用 ctrl+shift+v，见下）
 myna status     查看状态、当前模型、设备、粘贴键
+myna history    查看识别历史（见下，批量纠错用）
 myna doctor     依赖自检
 myna daemon     前台运行守护进程（调试用）
 myna uninstall  移除快捷键与服务
@@ -151,6 +152,68 @@ GPU 不可用时会自动降级到 `[asr] fallback_model`（默认 `small`），
 > 机器现在不值得为它牺牲速度，无 GPU 时它远好过 small。
 
 最常改的是 `[hotwords]` —— 把反复听错的人名、术语强制改回来。
+
+### 识别历史
+
+每次识别落一行 JSONL 存下来，供日后批量纠错。默认位置：
+
+```
+~/.local/share/myna/
+├── history/2026-08.jsonl        文本历史，按月一个文件
+└── audio/2026-08/<id>.wav       音频（默认关，开了才有）
+```
+
+准确说是 `$XDG_DATA_HOME/myna`，没设这个环境变量才落到 `~/.local/share`。
+`myna history --path` 打印当前实际路径。
+
+```
+myna history            最近 20 条
+myna history -n 100     最近 100 条
+myna history --raw      同时显示后处理前的原始输出
+myna history --json     JSONL 输出，接管道用
+myna history --path     只打印存档路径
+```
+
+一条记录长这样：
+
+```json
+{"id":"3f1c…","ts":"2026-08-14T22:41:07.213+08:00","raw":"去公园三步",
+ "text":"去公园散步","duration":2.1,"latency":0.7,"rtf":0.333,
+ "model":"Systran/faster-whisper-large-v3","device":"cuda","injected":"ok",
+ "hotwords_hit":["三步"],"audio":null}
+```
+
+**`raw` 和 `text` 两份都存**是刻意的：只有对照着看，才分得清一处错是模型听错的，
+还是热词表/繁转简自己改坏的——这两种错的修法完全相反。`hotwords_hit` 则回答
+「加的词到底有没有在用」。
+
+时间戳带毫秒和时区偏移，是为了能和 Claude Code 的 transcript
+（`~/.claude/projects/*/*.jsonl`，UTC）按时间对齐：myna 注入的文本 vs 你按回车前
+手改过的文本，差异就是现成的纠错标注。这是日后做批量纠错的原料。
+
+全部配置项：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `true` | 关掉就完全不记 |
+| `save_audio` | `false` | 连 wav 一起存，日后能拿新模型对老录音重跑做 A/B |
+| `max_audio_mb` | `200` | 音频总量上限，超了自动删最旧的（文本历史不受影响） |
+| `dir` | `""` | 存档根目录；留空即 `$XDG_DATA_HOME/myna`。`history/` 和 `audio/` 一起跟着走 |
+
+体积：文本一条约 300 字节，一天说一百句也才 30KB/月，放哪都无所谓。音频是
+16kHz 单声道 wav，**约 32KB/秒**，默认 200MB 上限约合 1.8 小时语音——这个量就得
+挑盘放了：
+
+```toml
+[history]
+save_audio = true
+dir = "/data/myna"        # 主盘紧张时把整个存档挪走
+```
+
+> 历史文件里是你说过的每一句话。目录和文件都是 0700/0600，只有本人可读；
+> 不需要就 `enabled = false` 关掉。
+
+（模型缓存是另一套路径，`myna models` 会打印，跟这个存档互不相干。）
 
 ## 实测
 

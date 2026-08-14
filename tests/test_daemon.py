@@ -115,6 +115,44 @@ def test_pipeline_injects_processed_text(d, monkeypatch, tmp_path):
     assert d._last_text == "去公园散步"
 
 
+def test_pipeline_archives_raw_and_final(d, monkeypatch, tmp_path):
+    """存档里 raw 必须是后处理**之前**的——否则日后没法判断错是谁造成的。"""
+    from myna import history
+
+    d.cfg.history.dir = str(tmp_path / "store")
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(daemon_mod, "wav_duration", lambda p: 2.0)
+    monkeypatch.setattr(d.transcriber, "transcribe", lambda p: " 去公园三步 ")
+    d.cfg.hotwords = {"三步": "散步"}
+    monkeypatch.setattr(daemon_mod.inject_mod, "inject",
+                        lambda t, c: daemon_mod.inject_mod.InjectResult(True, True, "ok"))
+
+    d._pipeline(wav)
+    rows = history.read_recent(10, d.cfg)
+    assert len(rows) == 1
+    assert rows[0]["raw"] == " 去公园三步 "
+    assert rows[0]["text"] == "去公园散步"
+    assert rows[0]["injected"] == "ok"
+
+
+def test_pipeline_archive_failure_does_not_break_injection(d, monkeypatch, tmp_path):
+    """存档挂了也得把字打出来——它是附加功能，不是前置条件。"""
+    wav = tmp_path / "a.wav"
+    wav.write_bytes(b"x" * 4096)
+    monkeypatch.setattr(daemon_mod, "wav_duration", lambda p: 2.0)
+    monkeypatch.setattr(d.transcriber, "transcribe", lambda p: "你好")
+    monkeypatch.setattr(daemon_mod.history, "record",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("盘满了")))
+    injected = []
+    monkeypatch.setattr(daemon_mod.inject_mod, "inject",
+                        lambda t, c: injected.append(t) or
+                        daemon_mod.inject_mod.InjectResult(True, True, "ok"))
+
+    d._pipeline(wav)
+    assert injected == ["你好"]
+
+
 def test_pipeline_no_inject_when_empty_result(d, monkeypatch, tmp_path):
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"x" * 4096)
