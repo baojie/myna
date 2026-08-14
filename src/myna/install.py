@@ -18,7 +18,61 @@ SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 CUSTOM_SCHEMA = f"{SCHEMA}.custom-keybinding"
 PREFIX = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
 KEY_NAME = "myna 语音输入"
-DEFAULT_BINDING = "<Super>d"
+# 不要用 <Super>d：GNOME 自带的「显示桌面」就占着它，绑上去按了只会最小化窗口。
+# <Super>z 实测空闲，且左手单手可及。
+DEFAULT_BINDING = "<Super>z"
+
+# 扫这些 schema 找冲突。GNOME 的快捷键散落在好几个 schema 里，只看一个会漏。
+KEYBINDING_SCHEMAS = (
+    "org.gnome.desktop.wm.keybindings",
+    "org.gnome.shell.keybindings",
+    "org.gnome.settings-daemon.plugins.media-keys",
+    "org.gnome.mutter.keybindings",
+    "org.gnome.mutter.wayland.keybindings",
+)
+
+
+def find_conflicts(binding: str) -> list[str]:
+    """找出还有谁占着这个键，返回 "schema 项名" 的列表。
+
+    绑一个已被占用的键，症状是「按了没反应」或者「按了在干别的事」，
+    而配置看起来完全正常——很难查。装之前就该拦住。
+    """
+    hits = []
+    for schema in KEYBINDING_SCHEMAS:
+        try:
+            r = subprocess.run(["gsettings", "list-recursively", schema],
+                               capture_output=True, text=True, timeout=10)
+        except Exception:
+            continue
+        if r.returncode != 0:
+            continue
+        for line in r.stdout.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) < 3:
+                continue
+            sch, key, value = parts
+            # 值形如 ['<Super>d', ...]，要精确匹配整个键位而非子串，
+            # 否则 <Super>d 会误命中 <Primary><Super>d
+            if f"'{binding}'" in value:
+                hits.append(f"{sch} {key}")
+
+    # 自定义快捷键各自住在带路径的子 schema 里，list-recursively 扫不到，
+    # 得顺着列表逐个查——否则两个自定义键撞在一起完全发现不了
+    try:
+        for path in _parse_list(_gsettings("get", SCHEMA, "custom-keybindings")):
+            target = f"{CUSTOM_SCHEMA}:{path}"
+            try:
+                if _gsettings("get", target, "binding").strip("'\"") != binding:
+                    continue
+                name = _gsettings("get", target, "name").strip("'\"")
+            except RuntimeError:
+                continue
+            hits.append(f"{SCHEMA} custom-keybindings（自定义快捷键「{name}」）")
+    except RuntimeError:
+        pass
+
+    return hits
 
 UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / "myna.service"
 
@@ -60,8 +114,20 @@ def _myna_exe() -> str:
     return f"{sys.executable} -m myna"
 
 
-def install_shortcut(binding: str = DEFAULT_BINDING) -> str:
-    """写入 GNOME 自定义快捷键，幂等：已有同名条目就地更新，不重复追加。"""
+def install_shortcut(binding: str = DEFAULT_BINDING, *, force: bool = False) -> str:
+    """写入 GNOME 自定义快捷键，幂等：已有同名条目就地更新，不重复追加。
+
+    绑之前先查冲突：绑一个已被占用的键，写入和回读都会成功，但按下去是别人
+    响应——这种「配置看着全对，功能就是不工作」最难查。宁可在这里拦住。
+    """
+    conflicts = [c for c in find_conflicts(binding)
+                 if not c.startswith(f"{SCHEMA} custom-keybindings")]
+    if conflicts and not force:
+        raise RuntimeError(
+            f"{binding} 已经被占用：\n  " + "\n  ".join(conflicts)
+            + "\n\n换一个键（myna install --key '<Super>z'），"
+              "或先在「设置 → 键盘」里解绑；确实要覆盖用 --force。")
+
     existing = _parse_list(_gsettings("get", SCHEMA, "custom-keybindings"))
 
     slot = None

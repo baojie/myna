@@ -68,8 +68,9 @@ def cmd_install(args) -> int:
     from . import install
 
     try:
-        slot = install.install_shortcut(args.key)
-        print(f"✓ 快捷键已绑定 {args.key}（{slot}）")
+        key = args.key or install.DEFAULT_BINDING
+        slot = install.install_shortcut(key, force=getattr(args, "force", False))
+        print(f"✓ 快捷键已绑定 {key}（{slot}）")
     except Exception as e:
         print(f"✗ 快捷键绑定失败：{e}", file=sys.stderr)
         return 1
@@ -144,7 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     mdl.set_defaults(func=cmd_model)
 
     ins = sub.add_parser("install", help="安装快捷键与后台服务")
-    ins.add_argument("--key", default="<Super>d", help="快捷键，默认 <Super>d")
+    ins.add_argument("--key", default=None,
+                     help="快捷键，默认 <Super>z（<Super>d 被 GNOME 显示桌面占用）")
+    ins.add_argument("--force", action="store_true",
+                     help="即使快捷键已被占用也照绑")
     ins.set_defaults(func=cmd_install)
 
     pk = sub.add_parser("paste-key", help="设置粘贴键（终端用 ctrl+shift+v）")
