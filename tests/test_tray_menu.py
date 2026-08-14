@@ -259,3 +259,120 @@ def test_user_click_still_works_after_suppression(monkeypatch, tmp_path):
     item.set_active(True)
     item.emit("activate")
     assert pasted == ["ctrl+shift+v"]
+
+
+# ---------- 未下载档位的下载确认 ----------
+
+
+def _fake_env(monkeypatch, dialog_response):
+    """注入假 GTK，并让 MessageDialog.run() 返回指定结果。"""
+    class FakeDialog(FakeWidget):
+        last = {}
+
+        def __init__(self, **kw):
+            super().__init__()
+            FakeDialog.last = dict(kw)
+
+        def format_secondary_markup(self, text):
+            FakeDialog.last["body"] = text
+
+        def set_title(self, t):
+            pass
+
+        def run(self):
+            return dialog_response
+
+    gtk = type("G", (FakeGtk,), {
+        "MessageDialog": FakeDialog,
+        "MessageType": types.SimpleNamespace(QUESTION=1),
+        "ButtonsType": types.SimpleNamespace(OK_CANCEL=1),
+        "ResponseType": types.SimpleNamespace(OK=-5, CANCEL=-6),
+    })
+    fake_gi = types.ModuleType("gi")
+    fake_gi.require_version = lambda *a, **k: None
+    repo = types.ModuleType("gi.repository")
+    repo.Gtk = gtk
+    repo.GLib = types.SimpleNamespace(
+        idle_add=lambda fn, *a: fn(*a),
+        markup_escape_text=lambda s: s)
+    repo.AyatanaAppIndicator3 = types.SimpleNamespace(
+        Indicator=FakeIndicator,
+        IndicatorCategory=types.SimpleNamespace(APPLICATION_STATUS=1),
+        IndicatorStatus=types.SimpleNamespace(ACTIVE=1))
+    monkeypatch.setitem(sys.modules, "gi", fake_gi)
+    monkeypatch.setitem(sys.modules, "gi.repository", repo)
+    return FakeDialog
+
+
+def test_undownloaded_model_asks_first(monkeypatch):
+    """点未下载的档位不能直接开下——先弹框说清是什么、多大、存哪。"""
+    dlg = _fake_env(monkeypatch, -5)  # OK
+    from myna import models as models_mod
+    from myna import tray as tray_mod
+    from myna.daemon import Daemon
+
+    monkeypatch.setattr(models_mod, "is_downloaded", lambda n: n != "tiny")
+    d = Daemon(Config())
+    switched = []
+    monkeypatch.setattr(d, "switch_model", lambda n, **k: switched.append(n))
+    monkeypatch.setattr(tray_mod, "log", logging_stub := types.SimpleNamespace(
+        debug=lambda *a, **k: None, warning=lambda *a, **k: None))
+    t = tray_mod.Tray(d)
+
+    item = t.model_items["tiny"]
+    item.set_active(True)
+    item.emit("activate")
+
+    body = dlg.last.get("body", "")
+    assert "Systran/faster-whisper-tiny" in body, "对话框必须写明真实模型名"
+    assert "75M" in body, "对话框必须写明体积"
+    assert "models--Systran--faster-whisper-tiny" in body, "对话框必须写明保存位置"
+    assert switched == ["tiny"], "确认后应当真的去切换"
+
+
+def test_cancel_download_does_not_switch(monkeypatch):
+    dlg = _fake_env(monkeypatch, -6)  # CANCEL
+    from myna import models as models_mod
+    from myna import tray as tray_mod
+    from myna.daemon import Daemon
+
+    monkeypatch.setattr(models_mod, "is_downloaded", lambda n: n != "tiny")
+    d = Daemon(Config())
+    switched = []
+    monkeypatch.setattr(d, "switch_model", lambda n, **k: switched.append(n))
+    t = tray_mod.Tray(d)
+
+    item = t.model_items["tiny"]
+    item.set_active(True)
+    item.emit("activate")
+    assert switched == [], "用户取消了就不能下载/切换"
+
+
+def test_downloaded_model_switches_without_dialog(monkeypatch):
+    dlg = _fake_env(monkeypatch, -6)  # 若弹框则返回 CANCEL，切换就不会发生
+    from myna import models as models_mod
+    from myna import tray as tray_mod
+    from myna.daemon import Daemon
+
+    monkeypatch.setattr(models_mod, "is_downloaded", lambda n: True)
+    d = Daemon(Config())
+    switched = []
+    monkeypatch.setattr(d, "switch_model", lambda n, **k: switched.append(n))
+    t = tray_mod.Tray(d)
+
+    item = t.model_items["medium"]
+    item.set_active(True)
+    item.emit("activate")
+    assert switched == ["medium"], "已下载的档位不该多问一句"
+
+
+def test_menu_label_marks_undownloaded(monkeypatch):
+    _fake_env(monkeypatch, -5)
+    from myna import models as models_mod
+    from myna import tray as tray_mod
+    from myna.daemon import Daemon
+
+    monkeypatch.setattr(models_mod, "is_downloaded", lambda n: n == "large-v3")
+    t = tray_mod.Tray(Daemon(Config()))
+    assert t._model_label("large-v3") == "large-v3"
+    assert "需下载" in t._model_label("tiny")

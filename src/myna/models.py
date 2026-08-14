@@ -11,6 +11,14 @@ small 最快、large 不现实。
 
 from __future__ import annotations
 
+import os
+
+# HuggingFace 新版默认走 xet 存储传输，实测在本机会**卡死**：小文件都下完，
+# 大的 model.bin 停在 0 字节且进程不退出，也不报错。直连 CDN 明明是通的
+# （HTTP 206，500KB/s+）。禁用后立刻恢复正常。
+# 用 setdefault 而不是硬写，留给用户按需覆盖。
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 # 档位名 → faster-whisper 完整模型名（HF repo id）
 PRESETS: dict[str, str] = {
     # Systran 没有出 turbo 的 CTranslate2 版本（曾误写成
@@ -104,6 +112,40 @@ def disk_size(name: str) -> str | None:
             return f"{total:.0f}{unit}" if unit in "BK" else f"{total:.1f}{unit}"
         total /= 1024
     return None
+
+
+def download(name: str, *, attempts: int = 10, on_retry=None) -> str:
+    """下载模型，带断点续传重试。
+
+    实测 HF 会在传输中途掐断（`peer closed connection without sending complete
+    message body`，1.6G 的文件下到 120MB 就断）。一次失败就报错的话，用户从
+    托盘点下载基本没几次能成。huggingface_hub 会保留 .incomplete 并续传，
+    所以直接重试即可，不必自己拼字节。
+    """
+    import time
+
+    from huggingface_hub import snapshot_download
+
+    repo = resolve_model(name)
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            path = snapshot_download(repo, max_workers=2)
+            # **不能信它的返回值**：实测 snapshot_download 会在 model.bin 只下了
+            # 115MB/1.6G 的情况下正常返回，snapshots 里压根没有 model.bin，
+            # blobs 里躺着 .incomplete。以磁盘实际情况为准，缺了就继续重试。
+            if is_downloaded(name):
+                return path
+            last = RuntimeError("下载返回成功但 model.bin 不完整")
+        except Exception as e:
+            last = e
+        if on_retry is not None:
+            try:
+                on_retry(i, attempts, last)
+            except Exception:
+                pass
+        time.sleep(min(3 * i, 15))
+    raise RuntimeError(f"{repo} 下载失败（重试 {attempts} 次）：{last}")
 
 
 def describe(name: str) -> dict:
