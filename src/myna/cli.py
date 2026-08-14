@@ -12,9 +12,9 @@ from .client import DaemonUnavailable, request
 HINT = "守护进程没有运行。启动：systemctl --user start myna    （或前台调试：myna daemon）"
 
 
-def _simple(cmd: str) -> int:
+def _simple(cmd: str, payload: dict | None = None) -> int:
     try:
-        resp = request(cmd)
+        resp = request(cmd, payload=payload)
     except DaemonUnavailable as e:
         print(f"{e}。{HINT}", file=sys.stderr)
         return 1
@@ -22,6 +22,20 @@ def _simple(cmd: str) -> int:
         print(resp.get("state", ""))
         return 0
     print(resp.get("error", "失败"), file=sys.stderr)
+    return 1
+
+
+def cmd_model(args) -> int:
+    """切换识别模型。切换在后台进行，返回后模型仍在加载。"""
+    try:
+        resp = request("switch", payload={"model": args.name})
+    except DaemonUnavailable as e:
+        print(f"{e}。{HINT}", file=sys.stderr)
+        return 1
+    if resp.get("ok"):
+        print(f"正在切换…（{args.name}），完成后会通知你")
+        return 0
+    print(resp.get("error", "切换失败"), file=sys.stderr)
     return 1
 
 
@@ -107,6 +121,10 @@ def build_parser() -> argparse.ArgumentParser:
     st = sub.add_parser("status", help="查看状态")
     st.add_argument("--json", action="store_true")
     st.set_defaults(func=cmd_status)
+
+    mdl = sub.add_parser("model", help="切换识别模型（如 medium / turbo）")
+    mdl.add_argument("name", help="模型档位或 HuggingFace 模型名")
+    mdl.set_defaults(func=cmd_model)
 
     ins = sub.add_parser("install", help="安装快捷键与后台服务")
     ins.add_argument("--key", default="<Super>d", help="快捷键，默认 <Super>d")

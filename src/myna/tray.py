@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 
+from . import models as models_mod
+
 log = logging.getLogger("myna")
 
 # 用系统主题里的 symbolic 图标，顶栏会自动按主题渲染成单色，
@@ -100,17 +102,28 @@ class Tray:
         self.toggle_item = Gtk.MenuItem(label="开始录音")
         self.cancel_item = Gtk.MenuItem(label="放弃本次录音")
         self.copy_item = Gtk.MenuItem(label="复制上次识别结果")
+        self.about_item = Gtk.MenuItem(label="关于 myna")
         self.quit_item = Gtk.MenuItem(label="退出 myna")
 
         self.toggle_item.connect("activate", self._on_toggle)
         self.cancel_item.connect("activate", self._on_cancel)
         self.copy_item.connect("activate", self._on_copy)
+        self.about_item.connect("activate", self._on_about)
         self.quit_item.connect("activate", self._on_quit)
+
+        # 「识别模型」子菜单：radio 列出档位，当前模型打勾；切换中整组禁用
+        self.model_label = Gtk.MenuItem(label="识别模型：-")
+        self.model_label.set_sensitive(False)
+        self.model_items: dict[str, Gtk.RadioMenuItem] = {}
+        self._build_model_menu()
+        self.model_item = Gtk.MenuItem(label="识别模型")
+        self.model_item.set_submenu(self.model_menu)
 
         menu = Gtk.Menu()
         for item in (self.status_item, Gtk.SeparatorMenuItem(),
                      self.toggle_item, self.cancel_item, Gtk.SeparatorMenuItem(),
-                     self.copy_item, Gtk.SeparatorMenuItem(), self.quit_item):
+                     self.copy_item, self.model_item, Gtk.SeparatorMenuItem(),
+                     self.about_item, self.quit_item):
             menu.append(item)
         menu.show_all()
         self.indicator.set_menu(menu)
@@ -132,6 +145,7 @@ class Tray:
         self.toggle_item.set_sensitive(state != "transcribing")
         self.cancel_item.set_sensitive(state == "recording")
         self.copy_item.set_sensitive(bool(self.daemon._last_text))
+        self._refresh_model()
         # 录音时把状态写到图标旁边，扫一眼就知道它在听
         self.indicator.set_label("● 录音中" if state == "recording" else "", "myna")
         return False  # 一次性回调
@@ -149,6 +163,54 @@ class Tray:
 
         if self.daemon._last_text:
             clipboard_set(self.daemon._last_text)
+
+    def _build_model_menu(self) -> None:
+        Gtk = self.Gtk  # GTK 只在 __init__ 的局部作用域导入，方法里必须走 self
+        sub = Gtk.Menu()
+        group: list = []  # pygobject 的 radio group 要传列表，不能传单个 widget
+        for name in models_mod.PRESETS:
+            item = Gtk.RadioMenuItem.new_with_label(group, name)
+            group.append(item)
+            item.connect("activate", self._on_model_activate, name)
+            self.model_items[name] = item
+            sub.append(item)
+        sub.show_all()
+        self.model_menu = sub
+
+    def _on_model_activate(self, w, name: str) -> None:
+        # radio 在取消选中时也会收到 activate，只在真正选中时处理
+        if not w.get_active():
+            return
+        self.daemon.switch_model(name)
+
+    def _refresh_model(self) -> None:
+        st = self.daemon.status()
+        cur = st.get("model")
+        switching = bool(st.get("switching"))
+        self.model_label.set_label(f"当前：{cur or '—'}")
+        for name, item in self.model_items.items():
+            item.set_sensitive(not switching)
+            if not switching:
+                item.set_active(models_mod.resolve_model(name) == cur)
+
+    def _on_about(self, _w) -> None:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            ver = version("myna")
+        except PackageNotFoundError:
+            ver = "dev"
+        dlg = self.Gtk.AboutDialog()
+        dlg.set_program_name("myna 八哥")
+        dlg.set_version(ver)
+        dlg.set_comments(
+            "Linux 桌面语音输入法：快捷键唤醒，文字直落焦点窗口。全程本地。")
+        dlg.set_copyright("© 2026 baojie")
+        dlg.set_license_type(self.Gtk.License.MIT_X11)
+        dlg.set_website("https://github.com/baojie/myna")
+        dlg.set_website_label("GitHub")
+        dlg.connect("response", lambda d, _r: d.destroy())
+        dlg.show()
 
     def _on_quit(self, _w) -> None:
         self.daemon.shutdown()

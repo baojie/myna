@@ -151,3 +151,73 @@ def test_status_shape(d):
 
 def test_unknown_command(d):
     assert not d.dispatch({"cmd": "飞起来"})["ok"]
+
+
+# ---------- 模型热切换 switch_model ----------
+
+
+class _FakeLoaded:
+    def __init__(self, name: str):
+        self.name = name
+
+
+def _sync_thread(target, args=(), daemon=None):
+    return type("T", (), {"start": lambda self: target(*args)})()
+
+
+def test_switch_model_idle_starts_background_switch(d, monkeypatch):
+    switched = []
+    monkeypatch.setattr(d.transcriber, "switch",
+                        lambda name: switched.append(name) or _FakeLoaded(name))
+    monkeypatch.setattr(daemon_mod.threading, "Thread", _sync_thread)
+    resp = d.switch_model("medium")
+    assert resp["ok"] and resp["switching"]
+    assert switched == ["medium"]
+    assert d._switching is False  # 同步线程跑完已复位
+
+
+def test_switch_model_rejected_while_recording(d):
+    d.start()
+    resp = d.switch_model("medium")
+    assert not resp["ok"]
+    assert "空闲" in resp["error"]
+    assert d.state is State.RECORDING
+
+
+def test_switch_model_rejects_reentry(d):
+    d._switching = True
+    resp = d.switch_model("medium")
+    assert not resp["ok"]
+    assert "切换" in resp["error"]
+
+
+def test_switch_model_failure_notifies_and_resets(d, monkeypatch):
+    notified = []
+    monkeypatch.setattr(daemon_mod.notify, "error", lambda m: notified.append(m))
+
+    def boom(name):
+        raise RuntimeError("显存不足")
+
+    monkeypatch.setattr(d.transcriber, "switch", boom)
+    monkeypatch.setattr(daemon_mod.threading, "Thread", _sync_thread)
+    resp = d.switch_model("turbo")
+    assert resp["ok"]
+    assert notified  # 失败被明确通知
+    assert d._switching is False
+
+
+def test_switch_model_refreshes_tray(d, monkeypatch):
+    """切换完成/失败都触发状态回调，托盘借此刷新模型勾选。"""
+    calls = []
+    d.on_state_change = lambda s: calls.append(s)
+    monkeypatch.setattr(d.transcriber, "switch", lambda name: _FakeLoaded(name))
+    monkeypatch.setattr(daemon_mod.threading, "Thread", _sync_thread)
+    d.switch_model("medium")
+    assert calls  # 完成后调用了状态回调
+
+
+def test_switch_command_dispatch(d, monkeypatch):
+    monkeypatch.setattr(daemon_mod.threading, "Thread", _sync_thread)
+    monkeypatch.setattr(d.transcriber, "switch", lambda name: _FakeLoaded(name))
+    resp = d.dispatch({"cmd": "switch", "model": "small"})
+    assert resp["ok"]

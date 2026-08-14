@@ -176,6 +176,7 @@ GNOME 快捷键只有「按下」事件、没有「释放」事件，所以 v1 �
 | `myna start` / `myna stop` | 显式控制 |
 | `myna cancel` | 放弃本次录音，不识别 |
 | `myna status` | 打印状态、模型、设备、socket |
+| `myna model <档位>` | 热切换识别模型（托盘菜单同一个动作） |
 | `myna install` / `myna uninstall` | 配置/移除快捷键与 systemd 服务 |
 | `myna doctor` | 依赖自检，逐项给出修复建议 |
 
@@ -189,6 +190,9 @@ GNOME 快捷键只有「按下」事件、没有「释放」事件，所以 v1 �
 ```json
 → {"cmd": "toggle"}
 ← {"ok": true, "state": "recording"}
+
+→ {"cmd": "switch", "model": "turbo"}
+← {"ok": true, "state": "idle", "switching": true}   // 后台加载，完成/失败会通知
 ```
 
 socket 权限 0600。仅本机本用户。
@@ -278,7 +282,12 @@ src/myna/
 - 线程模型：GTK 独占主线程跑 `Gtk.main()`，socket 循环挪到后台线程。
   daemon 只暴露 `on_state_change` 回调，不知道托盘存在；回调可能来自任意线程，
   一律 `GLib.idle_add` 转交主线程——跨线程直接碰 GTK 会随机崩。
-- 菜单：开始/停止、放弃本次录音、复制上次识别结果、退出。
+- 菜单：开始/停止、放弃本次录音、复制上次识别结果、**识别模型**（radio 档位
+  子菜单，当前打勾；切换中整组禁用）、关于、退出。
+- **模型热切换**：托盘/`myna model` 发 `switch` 命令。加载要 10s 级，放后台
+  线程不阻塞快捷键；**旧模型在加载期间保持可用**（`Transcriber.switch` 只在新
+  模型加载成功后替换一次 `self.loaded`），失败回滚并明确通知。仅空闲态允许
+  切换，录音/识别中拒绝。切换完成/失败都触发状态回调，托盘借此刷新勾选。
 
 ## 9. 增补（v1.1）：模型离线加载
 

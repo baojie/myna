@@ -41,6 +41,7 @@ class Daemon:
         self._stop = threading.Event()
         self._server: socket.socket | None = None
         self._last_text = ""
+        self._switching = False  # 模型热切换进行中，防重入
         # 状态变化钩子，托盘图标用它刷新。回调在持锁时被调用，
         # 实现方必须立刻返回（托盘用 GLib.idle_add 转交主线程）。
         self.on_state_change: "Callable[[State], None] | None" = None
@@ -143,6 +144,8 @@ class Daemon:
             return self.cancel()
         if cmd == "status":
             return self.status()
+        if cmd == "switch":
+            return self.switch_model(req.get("model", ""))
         if cmd == "ping":
             return {"ok": True, "state": self.state.value}
         return {"ok": False, "error": f"未知命令：{cmd}"}
@@ -158,6 +161,7 @@ class Daemon:
             "device": loaded.device if loaded else None,
             "compute_type": loaded.compute_type if loaded else None,
             "degraded": loaded.degraded if loaded else None,
+            "switching": self._switching,
             "elapsed": round(self.recorder.elapsed, 1),
             "last_text": self._last_text,
             "socket": str(socket_path()),
@@ -205,6 +209,40 @@ class Daemon:
             self._set_state(State.IDLE)
         notify.notify("🚫 已放弃本次录音")
         return {"ok": True, "state": State.IDLE.value}
+
+    def switch_model(self, name: str) -> dict:
+        """热切换识别模型。加载要 10s 级，放后台线程，快捷键绝不因此卡顿。
+
+        旧模型在加载期间保持可用：加载成功后只替换一次 self.loaded（见
+        Transcriber.switch），失败则回滚，识别能力不中断。
+        """
+        with self.lock:
+            if self.state is not State.IDLE:
+                notify.notify("⏳ 正在录音/识别，稍后再切换模型")
+                return {"ok": False, "state": self.state.value,
+                        "error": "仅在空闲时可切换模型"}
+            if self._switching:
+                return {"ok": False, "state": self.state.value,
+                        "error": "正在切换模型，请稍候"}
+            self._switching = True
+
+        def _do() -> None:
+            try:
+                loaded = self.transcriber.switch(name)
+                log.info("模型已切换：%s / %s / %s",
+                         loaded.name, loaded.device, loaded.compute_type)
+                notify.notify(f"✅ 识别模型已切换：{loaded.name} / {loaded.device}")
+            except Exception as e:
+                log.error("切换模型失败：%s", e)
+                notify.error(f"模型切换失败：{e}")
+            finally:
+                with self.lock:
+                    self._switching = False
+                # 不改变状态，但让托盘刷新模型勾选（回调可能来自任意线程）
+                self._set_state(self.state)
+
+        threading.Thread(target=_do, daemon=True).start()
+        return {"ok": True, "state": self.state.value, "switching": True}
 
     # ---------- 转写流水线 ----------
 

@@ -47,6 +47,7 @@ command 都对，binding 却是空字符串，等于没绑。
 ```
 myna toggle     开始/停止（快捷键绑的就是它）
 myna cancel     放弃本次录音，不识别
+myna model      切换识别模型（如 `myna model medium`，也可托盘里点）
 myna status     查看状态、当前模型与设备
 myna doctor     依赖自检
 myna daemon     前台运行守护进程（调试用）
@@ -63,7 +64,11 @@ myna uninstall  移除快捷键与服务
 | ⏺ 红点 + 「● 录音中」 | 正在录音 |
 | ⟳ 转圈 | 识别中 |
 
-点开有菜单：开始/停止录音、放弃本次录音、复制上次识别结果、退出。
+点开有菜单：开始/停止录音、放弃本次录音、复制上次识别结果、**识别模型**
+（子菜单切换档位，当前打勾）、关于、退出。
+
+切换模型不用重启 daemon：点菜单项或 `myna model medium`，加载在后台进行，
+几秒后弹出通知确认；加载期间旧模型继续用，切换失败也会明确告诉你并留在旧档。
 
 需要 `python3-gi` 和 `gir1.2-ayatanaappindicator3-0.1`（Ubuntu 自带），
 以及 GNOME 的 AppIndicator 扩展（Ubuntu 默认启用）。缺了也不影响主功能，

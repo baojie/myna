@@ -12,15 +12,18 @@ class DaemonUnavailable(Exception):
     pass
 
 
-def request(cmd: str, timeout: float = 5.0) -> dict:
+def request(cmd: str, payload: dict | None = None, timeout: float = 5.0) -> dict:
     path = socket_path()
     if not path.exists():
         raise DaemonUnavailable("守护进程没有运行")
+    req = {"cmd": cmd}
+    if payload:
+        req.update(payload)
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
         s.connect(str(path))
-        s.sendall((json.dumps({"cmd": cmd}) + "\n").encode())
+        s.sendall((json.dumps(req) + "\n").encode())
         buf = b""
         while not buf.endswith(b"\n"):
             chunk = s.recv(65536)
