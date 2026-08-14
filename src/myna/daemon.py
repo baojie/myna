@@ -145,7 +145,10 @@ class Daemon:
         if cmd == "status":
             return self.status()
         if cmd == "switch":
-            return self.switch_model(req.get("model", ""))
+            return self.switch_model(req.get("model", ""),
+                                     allow_download=req.get("allow_download", True))
+        if cmd == "models":
+            return self.models_info()
         if cmd == "paste_key":
             return self.set_paste_key(req.get("key", ""))
         if cmd == "ping":
@@ -213,12 +216,36 @@ class Daemon:
         notify.notify("🚫 已放弃本次录音")
         return {"ok": True, "state": State.IDLE.value}
 
-    def switch_model(self, name: str) -> dict:
+    def models_info(self) -> dict:
+        """所有档位的下载状态、体积、仓库名与本地路径，给托盘对话框和 CLI 用。"""
+        from . import models as models_mod
+
+        cur = self.transcriber.loaded.name if self.transcriber.loaded else None
+        return {
+            "ok": True,
+            "cache_root": str(models_mod.cache_root()),
+            "current": cur,
+            "models": [
+                {**models_mod.describe(n), "active": models_mod.resolve_model(n) == cur}
+                for n in models_mod.PRESETS
+            ],
+        }
+
+    def switch_model(self, name: str, *, allow_download: bool = True) -> dict:
         """热切换识别模型。加载要 10s 级，放后台线程，快捷键绝不因此卡顿。
 
         旧模型在加载期间保持可用：加载成功后只替换一次 self.loaded（见
         Transcriber.switch），失败则回滚，识别能力不中断。
+
+        `allow_download=False` 时，未下载的档位直接拒绝而不会静默联网拉几个 G
+        ——托盘据此先弹确认框，让用户知道要下什么、多大、存哪。
         """
+        from . import models as models_mod
+
+        if not allow_download and not models_mod.is_downloaded(name):
+            d = models_mod.describe(name)
+            return {"ok": False, "error": "模型尚未下载", "needs_download": True, **d}
+
         with self.lock:
             if self.state is not State.IDLE:
                 notify.notify("⏳ 正在录音/识别，稍后再切换模型")

@@ -20,7 +20,7 @@ def _plan(model: str, fallback: str = "small", device: str = "auto"):
 def test_plan_resolves_preset_names():
     # turbo 档位名在 _plan 里已被解析为完整 HF 模型名
     plan = _plan("turbo", device="cuda")
-    assert plan == [("Systran/faster-whisper-large-v3-turbo", "cuda", "float16")]
+    assert plan == [("deepdml/faster-whisper-large-v3-turbo-ct2", "cuda", "float16")]
 
 
 def test_plan_passthrough_custom_repo_id():

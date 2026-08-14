@@ -204,7 +204,7 @@ class Tray:
             sub = Gtk.Menu()
             group: list = []  # pygobject 的 radio group 要传列表，不能传单个 widget
             for name in models_mod.PRESETS:
-                item = Gtk.RadioMenuItem.new_with_label(group, name)
+                item = Gtk.RadioMenuItem.new_with_label(group, self._model_label(name))
                 group.append(item)
                 item.connect("activate", self._on_model_activate, name)
                 self.model_items[name] = item
@@ -240,12 +240,53 @@ class Tray:
         if self.daemon.cfg.inject.paste_key != key:
             self.daemon.set_paste_key(key)
 
+    def _model_label(self, name: str) -> str:
+        """菜单里就标出哪些还没下载，别等用户点了才知道要拉几个 G。"""
+        d = models_mod.describe(name)
+        return name if d["downloaded"] else f"{name}（需下载 {d['size']}）"
+
+    def _confirm_download(self, name: str) -> bool:
+        """未下载的档位，先把「是什么模型、多大、存哪、要联网」摆清楚再问。
+
+        不问就下的话，用户点一下菜单就静默拉几个 G——而 README 还写着
+        「全程本地，不联网」。模型体积和存储位置是用户真正关心的信息，
+        尤其本机主盘已用 98%，权重全靠 /data。
+        """
+        d = models_mod.describe(name)
+        dlg = Gtk.MessageDialog(
+            transient_for=None, modal=True,
+            message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text=f"下载识别模型「{name}」？")
+        dlg.format_secondary_markup(
+            f"这个档位本地还没有，需要联网下载。\n\n"
+            f"<b>模型</b>　{GLib.markup_escape_text(d['repo'])}\n"
+            f"<b>大小</b>　约 {d['size']}\n"
+            f"<b>存到</b>　<tt>{GLib.markup_escape_text(d['path'])}</tt>\n\n"
+            f"下载在后台进行，完成后会自动切换并通知你。\n"
+            f"期间当前模型继续可用。")
+        dlg.set_title("myna 八哥 —— 下载模型")
+        resp = dlg.run()
+        dlg.destroy()
+        return resp == Gtk.ResponseType.OK
+
     def _on_model_activate(self, w, name: str) -> None:
         if self._suppress:
             return
         # radio 在取消选中时也会收到 activate，只在真正选中时处理
         if not w.get_active():
             return
+
+        # 没下载过的档位，先弹框说清是什么模型、多大、存哪，用户点头才下
+        if not models_mod.is_downloaded(name):
+            if not self._confirm_download(name):
+                self._refresh_model()  # 用户取消，把勾选拨回当前模型
+                return
+            d = models_mod.describe(name)
+            from . import notify as notify_mod
+
+            notify_mod.notify(f"⬇️ 正在下载 {name}（约 {d['size']}）……")
+
         self.daemon.switch_model(name)
 
     def _refresh_model(self) -> None:
@@ -257,6 +298,7 @@ class Tray:
             self.model_label.set_label(f"当前：{cur or '—'}")
             for name, item in self.model_items.items():
                 item.set_sensitive(not switching)
+                item.set_label(self._model_label(name))
                 if not switching:
                     item.set_active(models_mod.resolve_model(name) == cur)
         finally:
