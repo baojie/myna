@@ -286,3 +286,24 @@ src/myna/
 的承诺不符，断网时还会拖慢启动。改为：先把所有候选按 `local_files_only=True`
 试一遍，全都不行才允许联网下载。已缓存的模型不再产生任何网络请求
 （实测启动后 HTTP 请求数为 0）。
+
+## 10. 事故记录：GTK 的 locale 副作用打死了转写
+
+加上托盘图标后，转写 100% 失败，报 `UnicodeDecodeError: 'ascii' codec can't
+decode byte 0xe8`——错误栈指向音频解码，看上去像是 wav 文件坏了，实际完全无关。
+
+真实因果链：
+
+1. GTK 初始化调用 `setlocale(LC_ALL, "")`；
+2. 此后 C 库 `strerror` 返回**本地化**字符串（中文系统上是「没有那个文件或目录」）；
+3. PyAV 的错误处理路径拿 `strerror` 的结果时用 **ascii** 解码，遇中文即抛异常；
+4. 它本来处理的只是重采样结束时一个**良性的 EOF 信号**——PyAV 内部会吞掉它，
+   但异常在构造错误消息时就抛出了，直接逃逸出来打死整条流水线。
+
+修复：`tray.py` 在 GTK 加载后立刻把 `LC_MESSAGES` 与 `LC_NUMERIC` 钉回 `C`
+（界面文字走 LC_CTYPE，菜单仍是中文）。`tests/test_tray_locale.py` 断言
+`os.strerror()` 必须是纯 ASCII。
+
+教训：**UI 库会改进程级全局状态**。托盘和音频处理同在一个进程，GTK 的
+`setlocale` 就足以打死核心功能，而症状出现在八竿子打不着的地方。往
+daemon 里塞任何 GUI 组件都要考虑这层污染。

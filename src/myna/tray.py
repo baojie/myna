@@ -30,6 +30,31 @@ LABELS = {
 }
 
 
+def _fix_locale_after_gtk() -> None:
+    """把 GTK 改掉的 locale 拨回来。
+
+    GTK 初始化会 setlocale(LC_ALL, "")，于是 C 库的 strerror 开始返回**本地化**
+    字符串。PyAV 的错误处理路径拿 strerror 的结果时用 ascii 解码，遇到中文直接
+    UnicodeDecodeError——而它本来在处理的只是一个良性的 EOF 信号。后果是：
+    只要托盘开着，音频解码必炸，转写全军覆没。
+
+    这是 PyAV 的 bug，我们只能规避：把 LC_MESSAGES 钉回 C，让 strerror 返回
+    纯 ASCII 英文。顺带把 LC_NUMERIC 也钉回 C——GTK 程序处理数字时的惯例做法，
+    免得某些 locale 下小数点变成逗号。
+    界面文字走的是 LC_CTYPE/LANG，不受影响，菜单仍是中文。
+    """
+    import locale
+
+    for category in ("LC_MESSAGES", "LC_NUMERIC"):
+        cat = getattr(locale, category, None)
+        if cat is None:
+            continue
+        try:
+            locale.setlocale(cat, "C")
+        except Exception:
+            log.debug("重置 %s 失败", category, exc_info=True)
+
+
 def available() -> bool:
     try:
         import gi
@@ -58,6 +83,9 @@ class Tray:
             gi.require_version("AppIndicator3", "0.1")
             from gi.repository import AppIndicator3 as AppIndicator
         from gi.repository import GLib, Gtk
+
+        # 导入 Gtk 就已经动了 locale，必须马上拨回来，否则音频解码会炸
+        _fix_locale_after_gtk()
 
         self.Gtk, self.GLib = Gtk, Gtk and GLib
         self.daemon = daemon
