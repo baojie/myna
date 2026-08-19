@@ -19,8 +19,8 @@ from myna.config import Config
 
 
 def test_qwen3_preset_registered():
-    assert models_mod.PRESETS["qwen3"] == "Daumee/Qwen3-ASR-0.6B-ONNX-CPU"
-    assert models_mod.APPROX_SIZES["qwen3"] == "2.5G"
+    assert models_mod.PRESETS["qwen3"] == "cvxhull/qwen3-asr-0.6b-onnx-fp16"
+    assert models_mod.APPROX_SIZES["qwen3"] == "2.9G"
 
 
 def test_is_qwen3():
@@ -77,6 +77,9 @@ def test_load_qwen3_downloads_when_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(models_mod, "snapshot_dir", lambda n: snap)
 
     class FakeQ3:
+        device = "cpu"
+        compute_type = "int8"
+
         def __init__(self, onnx_dir, **kw):
             self.onnx_dir = onnx_dir
 
@@ -100,6 +103,9 @@ def test_load_qwen3_uses_cache_when_downloaded(monkeypatch, tmp_path):
     monkeypatch.setattr(models_mod, "snapshot_dir", lambda n: snap)
 
     class FakeQ3:
+        device = "cpu"
+        compute_type = "int8"
+
         def __init__(self, onnx_dir, **kw):
             self.onnx_dir = onnx_dir
 
@@ -181,6 +187,7 @@ def test_qwen3_asr_reports_incomplete_files(monkeypatch, tmp_path):
     fake.SessionOptions = type("SessionOptions", (), {})
     fake.GraphOptimizationLevel = type("G", (), {"ORT_ENABLE_ALL": 1})
     fake.InferenceSession = type("InferenceSession", (), {"__init__": lambda *a, **k: None})
+    fake.get_available_providers = lambda: ["CPUExecutionProvider"]
     monkeypatch.setitem(sys.modules, "onnxruntime", fake)
     with pytest.raises(RuntimeError, match="不完整"):
         Qwen3Asr(tmp_path)

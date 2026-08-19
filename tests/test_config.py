@@ -3,7 +3,7 @@ from myna import config as config_mod
 
 def test_defaults_without_file(tmp_path):
     cfg = config_mod.load(tmp_path / "nope.toml")
-    assert cfg.asr.model == "large-v3"
+    assert cfg.asr.model == "qwen3"
     assert cfg.asr.initial_prompt  # 必需参数，不能是空
     assert cfg.inject.method == "clipboard"
     assert cfg.hotwords == {}
