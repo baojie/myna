@@ -12,17 +12,78 @@ from .client import DaemonUnavailable, request
 HINT = "守护进程没有运行。启动：systemctl --user start myna    （或前台调试：myna daemon）"
 
 
+def _autostart() -> bool:
+    """守护进程没在跑就把 systemd 服务拉起来，等它就绪。
+
+    点 dock 图标（Exec=myna toggle）时 Terminal=false，报错没人看得见——
+    服务一停，点图标就成了「什么都不发生」。这里兜底：自己启动，并用桌面
+    通知告诉用户在等什么（首次要读模型进显存，几十秒很正常）。
+    """
+    import subprocess
+    import time
+
+    from . import notify
+    from .client import ping
+
+    r = subprocess.run(["systemctl", "--user", "start", "myna.service"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    notify.notify("⏳ 正在启动守护进程……模型加载完再按一次")
+    # 冷启动要把 2.9G 模型读进显存，实测 130 秒上下，等窄了会把「还在加载」
+    # 误报成「起不来」
+    for _ in range(240):
+        if ping():
+            return True
+        time.sleep(1)
+    return False
+
+
+def _service_active() -> bool:
+    import subprocess
+    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "myna.service"]).returncode == 0
+
+
 def _simple(cmd: str, payload: dict | None = None) -> int:
     try:
         resp = request(cmd, payload=payload)
     except DaemonUnavailable as e:
+        if _autostart():
+            if cmd in ("toggle", "start"):
+                # 拉起来要几十秒，这期间用户早松手走开了。这时候闷声开录会录下
+                # 一段没人说话的空音频，所以只报「可以了」，让他自己再按一次。
+                from . import notify
+                notify.notify("✅ 已就绪，再按一次开始说话")
+                return 0
+            try:
+                resp = request(cmd, payload=payload)
+            except DaemonUnavailable as e2:
+                e = e2
+            else:
+                return _report(resp)
         print(f"{e}。{HINT}", file=sys.stderr)
+        if _service_active():
+            # 服务在跑、socket 还没开 = 模型还在往显存里读，不是故障
+            from . import notify
+            notify.notify("⏳ 还在加载模型，稍后再按一次")
+        else:
+            _notify_failure(f"{e}")
         return 1
+    return _report(resp)
+
+
+def _report(resp: dict) -> int:
     if resp.get("ok"):
         print(resp.get("state", ""))
         return 0
     print(resp.get("error", "失败"), file=sys.stderr)
     return 1
+
+
+def _notify_failure(msg: str) -> None:
+    """没有终端的调用方（dock 图标、快捷键）只能靠通知知道失败了。"""
+    from . import notify
+    notify.error(f"{msg}，服务起不来。看日志：myna log")
 
 
 def cmd_model(args) -> int:
