@@ -69,14 +69,41 @@ APPROX_SIZES: dict[str, str] = {
 
 
 def cache_root() -> "Path":
-    """HuggingFace 缓存根目录（本机是指向 /data 的符号链接）。"""
+    """模型（HuggingFace 缓存）放在哪一层，即直接装着 models--*/ 的目录。
+
+    优先级从高到低：
+
+    1. `HF_HUB_CACHE` 环境变量——外部显式指定的（systemd 单元、命令行前缀）
+       压过配置文件；
+    2. 配置 `[models] cache_dir`——本机主盘装不下时把模型挪到别的盘，daemon
+       和 CLI 都从这里读，不必两头改环境变量；
+    3. `HF_HOME/hub`；
+    4. `~/.cache/huggingface/hub`。
+
+    注意 2 之所以还要再读一遍配置：`myna models` 这类子命令未必走过
+    `config.load()`，只认环境变量的话，它会去看默认目录、报「未下载」，
+    而 daemon 明明在别的盘上加载得好好的。
+    """
     from pathlib import Path
 
     import os
 
-    env = os.environ.get("HF_HUB_CACHE") or os.environ.get("HF_HOME")
+    env = os.environ.get("HF_HUB_CACHE")
     if env:
-        p = Path(env)
+        return Path(env).expanduser()
+
+    try:
+        from . import config as config_mod
+
+        configured = config_mod.load().models.cache_dir
+    except Exception:  # 配置坏了不该连模型都找不到，退回 HF 的规矩
+        configured = ""
+    if configured:
+        return Path(configured).expanduser()
+
+    home = os.environ.get("HF_HOME")
+    if home:
+        p = Path(home).expanduser()
         return p / "hub" if p.name != "hub" else p
     return Path.home() / ".cache" / "huggingface" / "hub"
 
@@ -149,10 +176,21 @@ def disk_size(name: str) -> str | None:
     if not d.is_dir():
         return None
     total = 0
+    # 跳过符号链接是为了不把 snapshots/ 里指向 blobs/ 的链接重复计一遍；但
+    # 权重 blob 有可能压根不在本目录下（本机就是 blobs 留在别的盘、这边只放
+    # 跨盘链接），那样一律跳过会算出「40B」这种荒唐数字。按 (dev, inode) 去
+    # 重，既不重复计数，也不会漏掉链到别处的真身。
+    seen = set()
     for f in d.rglob("*"):
         try:
-            if f.is_file() and not f.is_symlink():
-                total += f.stat().st_size
+            st = f.stat()  # 跟随符号链接
+            if not f.is_file():
+                continue
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            total += st.st_size
         except OSError:
             continue
     if total == 0:
@@ -180,7 +218,10 @@ def download(name: str, *, attempts: int = 10, on_retry=None) -> str:
     last = None
     for i in range(1, attempts + 1):
         try:
-            path = snapshot_download(repo, max_workers=2)
+            # 显式传目录而不是靠环境变量：huggingface_hub 在 import 时就把
+            # 默认缓存路径定死了，配置若在它之后才生效就会下到另一个盘去
+            path = snapshot_download(repo, max_workers=2,
+                                     cache_dir=str(cache_root()))
             # **不能信它的返回值**：实测 snapshot_download 会在 model.bin 只下了
             # 115MB/1.6G 的情况下正常返回，snapshots 里压根没有 model.bin，
             # blobs 里躺着 .incomplete。以磁盘实际情况为准，缺了就继续重试。

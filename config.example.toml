@@ -33,6 +33,14 @@ restore_clipboard = true    # 粘贴后把你原来的剪贴板内容还回去
 [inject.paste_key_by_app]
 "org.gnome.Console" = "ctrl+shift+v"
 
+[models]
+# 模型权重放在哪一层目录（里面直接是 models--<org>--<repo>/）。
+# 留空 = 跟随 HuggingFace 默认，即 HF_HUB_CACHE / HF_HOME / ~/.cache/huggingface/hub。
+# 主盘装不下就指到别的盘，例如 "/data/cache/huggingface/hub"。
+# daemon 和 CLI 都读这一处，不必再去分别改 shell 和 systemd 的环境变量；
+# 但外部显式设的 HF_HUB_CACHE 仍然压过这里（服务定义 > 配置文件）。
+cache_dir = ""
+
 [tray]
 enabled = true              # 顶栏状态图标。缺 GTK/AppIndicator 会自动跳过，不影响主功能
 

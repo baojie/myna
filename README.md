@@ -303,8 +303,17 @@ whisper 内部这几档谁更准，20 句样本依然定不了论——但已不
 ./run.sh log        # 跟日志
 ```
 
-模型权重一律走 HuggingFace 缓存（本机 `~/.cache/huggingface` 是指向 `/data` 的
-符号链接），不在仓库或主盘另存——主盘已用 98%。
+模型权重一律走 HuggingFace 缓存，不在仓库或主盘另存——主盘已用 98%。放哪由
+配置决定：
+
+```toml
+[models]
+cache_dir = "/data/cache/huggingface/hub"   # 留空则跟随 HF 默认
+```
+
+优先级是 `HF_HUB_CACHE` 环境变量 > `[models] cache_dir` > `HF_HOME/hub` >
+`~/.cache/huggingface/hub`。daemon 和 CLI 读的是同一处，所以不必再分别给
+shell 和 systemd 单元设环境变量；`myna models` 头一行会打印实际用的目录。
 
 ## 许可
 

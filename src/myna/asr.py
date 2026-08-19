@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
-from .models import is_qwen3, known, presets_help, resolve_model
+from .models import cache_root, is_qwen3, known, presets_help, resolve_model
 
 
 def cuda_available() -> bool:
@@ -79,8 +79,11 @@ class Transcriber:
         for local_only in (True, False):
             for i, (m, device, compute_type) in enumerate(attempts):
                 try:
+                    # download_root 同理：faster-whisper 自己去问 HF 缓存在
+                    # 哪，不显式传就会绕过 [models] cache_dir
                     model = WhisperModel(m, device=device,
                                          compute_type=compute_type,
+                                         download_root=str(cache_root()),
                                          local_files_only=local_only)
                 except Exception as e:  # 未缓存、显存不足、缺 cuDNN、下载失败……
                     errors.append(

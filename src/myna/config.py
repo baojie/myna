@@ -76,6 +76,21 @@ class HistoryConfig:
 
 
 @dataclass
+class ModelsConfig:
+    """模型权重存放位置。
+
+    默认跟随 HuggingFace 自己的规矩（HF_HUB_CACHE / HF_HOME / ~/.cache），
+    但本机常常是「主盘放不下、得挪到别的盘」，而 HF 的环境变量对 systemd
+    服务和终端是两套，很容易只改了一边——所以这里给一个配置项，daemon 和
+    CLI 都从同一个地方读。
+    """
+
+    # HF 缓存目录，即里面直接放 models--<org>--<repo>/ 的那一层。
+    # 留空 = 不干预，走 HF 默认。
+    cache_dir: str = ""
+
+
+@dataclass
 class TrayConfig:
     # 顶栏状态图标。缺 GTK/AppIndicator 时自动跳过，不影响 daemon 本身
     enabled: bool = True
@@ -89,6 +104,7 @@ class Config:
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     tray: TrayConfig = field(default_factory=TrayConfig)
     history: HistoryConfig = field(default_factory=HistoryConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
     hotwords: dict[str, str] = field(default_factory=dict)
 
 
@@ -138,15 +154,34 @@ def save_paste_key(key: str, path: Path | None = None) -> None:
 def load(path: Path | None = None) -> Config:
     path = path or CONFIG_PATH
     if not path.exists():
-        return Config()
+        cfg = Config()
+        _export_cache_dir(cfg)
+        return cfg
     with path.open("rb") as f:
         raw = tomllib.load(f)
-    return Config(
+    cfg = Config(
         asr=_build(AsrConfig, raw.get("asr", {})),
         audio=_build(AudioConfig, raw.get("audio", {})),
         inject=_build(InjectConfig, raw.get("inject", {})),
         postprocess=_build(PostprocessConfig, raw.get("postprocess", {})),
         tray=_build(TrayConfig, raw.get("tray", {})),
         history=_build(HistoryConfig, raw.get("history", {})),
+        models=_build(ModelsConfig, raw.get("models", {})),
         hotwords={str(k): str(v) for k, v in raw.get("hotwords", {}).items()},
     )
+    _export_cache_dir(cfg)
+    return cfg
+
+
+def _export_cache_dir(cfg: Config) -> None:
+    """把 models.cache_dir 落到 HF_HUB_CACHE 环境变量上。
+
+    改进程环境是副作用，但这是唯一能一次管住所有下游的地方：模型路径不只
+    我们自己算，huggingface_hub 和 faster-whisper 各自也会去读 HF 的环境
+    变量。只改我们这边，就会出现「myna 说没下载、HF 却往另一个盘下」的分裂。
+    已经显式设了 HF_HUB_CACHE 的（比如 systemd 里写死的）不覆盖——命令行/
+    服务定义应当压过配置文件。
+    """
+    if cfg.models.cache_dir and not os.environ.get("HF_HUB_CACHE"):
+        os.environ["HF_HUB_CACHE"] = str(
+            Path(cfg.models.cache_dir).expanduser())

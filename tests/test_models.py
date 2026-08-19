@@ -1,3 +1,4 @@
+from myna import config as config_mod
 from myna import models
 
 
@@ -210,3 +211,48 @@ def test_no_partial_when_nothing_downloaded(tmp_path, monkeypatch):
     monkeypatch.setattr(models, "cache_root", lambda: tmp_path)
     d = models.describe("tiny")
     assert not d["downloaded"] and d["partial_bytes"] == 0 and d["partial"] is None
+
+
+def test_cache_root_prefers_env_over_config(monkeypatch, tmp_path):
+    """systemd 单元或命令行前缀里显式设的 HF_HUB_CACHE 应当压过配置文件。"""
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "from-env"))
+    cfg = config_mod.Config()
+    cfg.models.cache_dir = str(tmp_path / "from-config")
+    monkeypatch.setattr(config_mod, "load", lambda path=None: cfg)
+    assert models.cache_root() == tmp_path / "from-env"
+
+
+def test_cache_root_uses_config_when_no_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HF_HOME", raising=False)
+    cfg = config_mod.Config()
+    cfg.models.cache_dir = str(tmp_path / "from-config")
+    monkeypatch.setattr(config_mod, "load", lambda path=None: cfg)
+    assert models.cache_root() == tmp_path / "from-config"
+
+
+def test_cache_root_falls_back_when_config_broken(monkeypatch, tmp_path):
+    """配置读不出来不该连模型都找不到，退回 HF 自己的规矩。"""
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hfhome"))
+
+    def boom(path=None):
+        raise ValueError("坏掉的 TOML")
+
+    monkeypatch.setattr(config_mod, "load", boom)
+    assert models.cache_root() == tmp_path / "hfhome" / "hub"
+
+
+def test_disk_size_counts_blobs_on_another_disk(monkeypatch, tmp_path):
+    """权重 blob 挪到别的盘、这边只剩跨盘符号链接时，不能算成 0 字节。"""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    blob = elsewhere / "deadbeef"
+    blob.write_bytes(b"x" * 4096)
+
+    root = tmp_path / "hub"
+    d = root / "models--Systran--faster-whisper-small" / "snapshots" / "rev"
+    d.mkdir(parents=True)
+    (d / "model.bin").symlink_to(blob)
+    monkeypatch.setattr(models, "cache_root", lambda: root)
+    assert models.disk_size("small") == "4K"
